@@ -1,11 +1,19 @@
 {
   "version": "0.2.0",
   "configurations": [
+    // {
+    //   "name": "Python: test_db",
+    //   "type": "debugpy",
+    //   "request": "launch",
+    //   "program": "${workspaceFolder}/db.py",
+    //   "console": "integratedTerminal",
+    //   "envFile": "${workspaceFolder}/.env"
+    // },
     {
-      "name": "Python: test_db",
+      "name": "Python: GMS (Web)",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/test_db.py",
+      "program": "${workspaceFolder}/app.py",
       "console": "integratedTerminal",
       "envFile": "${workspaceFolder}/.env"
     }
