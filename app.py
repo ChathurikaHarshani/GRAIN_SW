@@ -1,5 +1,6 @@
-from flask import Flask, render_template
+from flask import Flask, render_template ,jsonify
 from db import get_conn
+from slingshot_client import get_jobdata_summary
 
 app = Flask(__name__)
 
@@ -24,3 +25,9 @@ def index():
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
+
+
+@app.route("/slingshot/jobdata")
+def slingshot_jobdata():
+    data = get_jobdata_summary(pagesize=20)  # try small page first
+    return jsonify(data)
