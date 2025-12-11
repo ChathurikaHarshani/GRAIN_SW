@@ -12,12 +12,17 @@
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
   <div class="container">
     <a class="navbar-brand fw-bold" href="/">GMS</a>
+    <a class="btn btn-outline-primary" href="{{ url_for('list_growers') }}">
+  Manage Growers
+</a>
     <div class="collapse navbar-collapse">
       <ul class="navbar-nav ms-auto">
         <li class="nav-item"><a class="nav-link active" href="/">Home</a></li>
         <li class="nav-item"><a class="nav-link" href="#">Loads</a></li>
         <li class="nav-item"><a class="nav-link" href="#">Inventory</a></li>
         <li class="nav-item"><a class="nav-link" href="#">Settings</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('list_growers') }}">Growers</a></li>
+
       </ul>
     </div>
   </div>
@@ -34,7 +39,20 @@
 
 <main class="container py-5">
   <div class="row g-4">
-    <div class="col-md-4">
+
+    <!-- Growers (new card) -->
+    <div class="col-md-3">
+      <div class="card h-100 shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">Growers</h5>
+          <p class="card-text">Manage grower profiles and contact information.</p>
+          <a href="{{ url_for('list_growers') }}" class="btn btn-sm btn-primary">Open</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Harvest Loads -->
+    <div class="col-md-3">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
           <h5 class="card-title">Harvest Loads</h5>
@@ -43,7 +61,9 @@
         </div>
       </div>
     </div>
-    <div class="col-md-4">
+
+    <!-- Inventory -->
+    <div class="col-md-3">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
           <h5 class="card-title">Inventory</h5>
@@ -52,7 +72,9 @@
         </div>
       </div>
     </div>
-    <div class="col-md-4">
+
+    <!-- Reports -->
+    <div class="col-md-3">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
           <h5 class="card-title">Reports</h5>
@@ -61,8 +83,12 @@
         </div>
       </div>
     </div>
+
+
+
   </div>
 </main>
+
 
 <footer class="py-4 bg-dark text-white-50">
   <div class="container small">© {{ 2025 }} GMS</div>
