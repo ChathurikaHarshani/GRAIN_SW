@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Harvest Query | GMS</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+<div class="container py-4">
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="mb-0">Harvest Query</h1>
+    <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">Home</a>
+  </div>
+
+  <!-- Filter bar (Field + Storage dropdowns like Excel idea) -->
+  <form method="get" class="row g-2 align-items-end">
+    <div class="col-md-4">
+      <label class="form-label">Field</label>
+      <select class="form-select" name="field_id">
+        <option value="">-- All Fields --</option>
+        {% for f in fields %}
+          <option value="{{ f.Field_ID }}" {% if selected_field|string == f.Field_ID|string %}selected{% endif %}>
+            {{ f.Field_Name }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label">Storage</label>
+      <select class="form-select" name="storloc_id">
+        <option value="">-- All Storage --</option>
+        {% for s in storages %}
+          <option value="{{ s.StorLoc_ID }}" {% if selected_storage|string == s.StorLoc_ID|string %}selected{% endif %}>
+            {{ s.Bin_Name }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-4">
+      <button class="btn btn-primary w-100" type="submit">Apply Filter</button>
+    </div>
+  </form>
+
+  <hr class="my-4">
+
+  <!-- Add new load (Excel-like input row) -->
+  <h4 class="mb-3">Add Harvest Load</h4>
+
+  {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" class="row g-2">
+    <div class="col-md-2">
+      <label class="form-label">Load</label>
+      <input class="form-control" name="load_num" required>
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label">Date</label>
+      <input type="date" class="form-control" name="harvest_date" required>
+    </div>
+
+    <div class="col-md-3">
+      <label class="form-label">Field</label>
+      <select class="form-select" name="field_id" required>
+        <option value="">-- Select Field --</option>
+        {% for f in fields %}
+          <option value="{{ f.Field_ID }}" {% if selected_field|string == f.Field_ID|string %}selected{% endif %}>
+            {{ f.Field_Name }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-3">
+      <label class="form-label">Storage</label>
+      <select class="form-select" name="storloc_id" required>
+        <option value="">-- Select Storage --</option>
+        {% for s in storages %}
+          <option value="{{ s.StorLoc_ID }}" {% if selected_storage|string == s.StorLoc_ID|string %}selected{% endif %}>
+            {{ s.Bin_Name }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label">Crop</label>
+      <select class="form-select" name="crop_id" required>
+        <option value="">-- Select Crop --</option>
+        {% for c in crops %}
+          <option value="{{ c.Crop_ID }}">{{ c.Crop_Name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label">Cart</label>
+      <select class="form-select" name="cart_id" required>
+        <option value="">-- Select Cart --</option>
+        {% for c in carts %}
+          <option value="{{ c.Cart_ID }}">{{ c.Cart_Name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label">MC</label>
+      <input type="number" step="0.01" class="form-control" name="mc">
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label">Gross</label>
+      <input type="number" step="0.01" class="form-control" name="gross">
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label">Tare</label>
+      <input type="number" step="0.01" class="form-control" name="tare">
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label">Note</label>
+      <input class="form-control" name="note">
+    </div>
+
+    <div class="col-md-12 mt-2">
+      <button class="btn btn-success" type="submit">Save Load</button>
+    </div>
+  </form>
+
+  <hr class="my-4">
+
+  <!-- Results table -->
+  <h4 class="mb-3">Loads</h4>
+
+  {% if loads %}
+    <div class="table-responsive">
+      <table class="table table-striped table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Load</th><th>Date</th><th>Field</th><th>Crop</th><th>MC</th>
+            <th>Gross</th><th>Tare</th><th>Storage</th><th>Bushels</th><th>Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in loads %}
+          <tr>
+            <td>{{ r.Load_Num }}</td>
+            <td>{{ r.Harvest_Date }}</td>
+            <td>{{ r.Field_Name }}</td>
+            <td>{{ r.Crop_Name }}</td>
+            <td>{{ r.MC }}</td>
+            <td>{{ r.Gross_Weight }}</td>
+            <td>{{ r.Tare_Weight }}</td>
+            <td>{{ r.Storage }}</td>
+            <td>{{ r.Bushels }}</td>
+            <td>{{ r.Note }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p>No loads found for the selected filter.</p>
+  {% endif %}
+
+
+  <div class="row g-3 mt-4">
+  <div class="col-md-3">
+    <div class="p-3 bg-white border rounded">
+      <div class="text-muted">MC%</div>
+      <div class="fs-4">
+        {% if mc_avg is not none %}{{ "%.1f"|format(mc_avg) }}{% else %}-{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-3">
+    <div class="p-3 bg-white border rounded">
+      <div class="text-muted">Lbs. Wet</div>
+      <div class="fs-4">
+        {% if lbs_wet is not none %}{{ "{:,.0f}".format(lbs_wet) }}{% else %}-{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-3">
+    <div class="p-3 bg-white border rounded">
+      <div class="text-muted">Bu. Wet</div>
+      <div class="fs-4">
+        {% if bu_wet is not none %}{{ "{:,.0f}".format(bu_wet) }}{% else %}-{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-3">
+    <div class="p-3 bg-white border rounded">
+      <div class="text-muted">Dry Bushels</div>
+      <div class="fs-4">
+        {% if dry_bushels is not none %}{{ "{:,.1f}".format(dry_bushels) }}{% else %}-{% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+
+</div>
+</body>
+</html>

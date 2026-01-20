@@ -12,7 +12,6 @@
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
   <div class="container">
     <a class="navbar-brand fw-bold" href="/">GMS</a>
-    <a class="btn btn-outline-primary" href="{{ url_for('list_growers') }}">
   Manage Growers
 </a>
     <div class="collapse navbar-collapse">
@@ -22,6 +21,16 @@
         <li class="nav-item"><a class="nav-link" href="#">Inventory</a></li>
         <li class="nav-item"><a class="nav-link" href="#">Settings</a></li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('list_growers') }}">Growers</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('list_departments') }}">Departments</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('list_fields') }}">Fields</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('list_carts') }}">Carts</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('list_crops') }}">Crops</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('list_storage') }}">Storage</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('list_delivery_locations') }}">Delivery Locations</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('list_market_prices') }}">Market Prices</a></li>
+
+
+
 
       </ul>
     </div>
@@ -51,16 +60,46 @@
       </div>
     </div>
 
+
+    <div class="col-md-3">
+  <div class="card h-100 shadow-sm">
+    <div class="card-body">
+      <h5 class="card-title">Departments</h5>
+      <p class="card-text">Manage departments and assign them to growers.</p>
+      <a href="{{ url_for('list_departments') }}" class="btn btn-sm btn-primary">Open</a>
+    </div>
+  </div>
+</div>
+
+
+
+
+
+
+
     <!-- Harvest Loads -->
     <div class="col-md-3">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
           <h5 class="card-title">Harvest Loads</h5>
           <p class="card-text">Create and track load tickets from field to elevator.</p>
-          <a href="#" class="btn btn-sm btn-primary">Open</a>
+          <a href="#" class="btn btn-sm btn-primary">View Table Data</a>
         </div>
       </div>
     </div>
+
+
+    <!-- Pace -->
+    <div class="col-md-3">
+      <div class="card h-100 shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">Pace</h5>
+          <p class="card-text">Daily total bushels by crop (Corn, Soybean, Milo).</p>
+          <a href="{{ url_for('pace') }}" class="btn btn-sm btn-primary">Open</a>
+        </div>
+      </div>
+    </div>
+
 
     <!-- Inventory -->
     <div class="col-md-3">
@@ -73,16 +112,32 @@
       </div>
     </div>
 
+
+    <!-- Billing 
+    <div class="col-md-3">
+      <div class="card h-100 shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">Billing</h5>
+          <p class="card-text">Invoice-style billing summary by month, location, and crop.</p>
+          <a href="{{ url_for('billing') }}" class="btn btn-sm btn-primary">Open</a>
+        </div>
+      </div>
+    </div>
+    -->
+
+
+
     <!-- Reports -->
     <div class="col-md-3">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
           <h5 class="card-title">Reports</h5>
-          <p class="card-text">Monthly summaries, tickets, reconciliation.</p>
-          <a href="#" class="btn btn-sm btn-primary">Open</a>
+          <p class="card-text">Billing, summaries, tickets, and reconciliation.</p>
+          <a href="{{ url_for('reports') }}" class="btn btn-sm btn-primary">Open</a>
         </div>
       </div>
     </div>
+
 
 
 
