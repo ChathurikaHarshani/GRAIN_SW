@@ -1,2 +1,28 @@
 body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
 .card-title { font-weight: 700; }
+
+
+.navbar {
+  padding-top: 1.25rem;
+  padding-bottom: 1.25rem;
+}
+
+
+.navbar {
+  font-size: 1.5rem;
+}
+
+
+/* Dropdown items */
+.dropdown-item {
+  font-size: 1.5rem;
+  padding: 0.6rem 1.2rem;  /* optional: more clickable */
+}
+
+
+.index-page {
+  background-image: url("/static/images/landing.png");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}

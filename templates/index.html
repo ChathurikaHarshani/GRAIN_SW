@@ -11,12 +11,19 @@
 <body>
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
   <div class="container">
+  <!--  
+  <div class="container-fluid px-4"></div>  
     <a class="navbar-brand fw-bold" href="/">GMS</a>
   Manage Growers
 </a>
+-->
     <div class="collapse navbar-collapse">
       <ul class="navbar-nav ms-auto">
+
+      
         <li class="nav-item"><a class="nav-link active" href="/">Home</a></li>
+    
+        <!----
         <li class="nav-item"><a class="nav-link" href="#">Loads</a></li>
         <li class="nav-item"><a class="nav-link" href="#">Inventory</a></li>
         <li class="nav-item"><a class="nav-link" href="#">Settings</a></li>
@@ -29,13 +36,45 @@
         <li class="nav-item"><a class="nav-link" href="{{ url_for('list_delivery_locations') }}">Delivery Locations</a></li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('list_market_prices') }}">Market Prices</a></li>
 
+        --->
 
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle"
+            href="#"
+            id="insertDataDropdown"
+            role="button"
+            data-bs-toggle="dropdown"
+            aria-expanded="false">
+            Insert Data
+          </a>
 
+          <ul class="dropdown-menu" aria-labelledby="insertDataDropdown">
+            <li><a class="dropdown-item" href="{{ url_for('list_growers') }}">Growers</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('list_departments') }}">Departments</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('list_fields') }}">Fields</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('list_carts') }}">Carts</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('list_crops') }}">Crops</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('list_storage') }}">Storage </a></li>
+
+            <li><hr class="dropdown-divider"></li>
+
+            <li><a class="dropdown-item" href="{{ url_for('list_delivery_locations') }}">Delivery Locations</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('list_market_prices') }}">Market Prices</a></li>
+          </ul>
+        </li>
+
+        <li class="nav-item"><a class="nav-link" href="#">Harvest</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('pace') }}">Pace</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('reports') }}">Reports</a></li>
+        <li class="nav-item"><a class="nav-link" href="#">Inventory</a></li>
+        <li class="nav-item"><a class="nav-link" href="#">Settings</a></li>
 
       </ul>
     </div>
   </div>
 </nav>
+
+<body class="index-page">
 
 <header class="py-5 bg-light border-bottom">
   <div class="container">
@@ -49,7 +88,7 @@
 <main class="container py-5">
   <div class="row g-4">
 
-    <!-- Growers (new card) -->
+    <!-- Growers (new card) 
     <div class="col-md-3">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
@@ -71,6 +110,7 @@
   </div>
 </div>
 
+ -->
 
 
 
@@ -89,7 +129,7 @@
     </div>
 
 
-    <!-- Pace -->
+    <!-- 
     <div class="col-md-3">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
@@ -99,9 +139,10 @@
         </div>
       </div>
     </div>
+   -->
 
 
-    <!-- Inventory -->
+    <!-- Inventory 
     <div class="col-md-3">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
@@ -111,6 +152,7 @@
         </div>
       </div>
     </div>
+     -->
 
 
     <!-- Billing 
@@ -127,7 +169,7 @@
 
 
 
-    <!-- Reports -->
+    <!-- Reports
     <div class="col-md-3">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
@@ -137,6 +179,7 @@
         </div>
       </div>
     </div>
+     -->
 
 
 
@@ -144,9 +187,12 @@
   </div>
 </main>
 
-
 <footer class="py-4 bg-dark text-white-50">
   <div class="container small">© {{ 2025 }} GMS</div>
 </footer>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
 </body>
+
+
 </html>
