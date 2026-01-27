@@ -1,6 +1,7 @@
 import os
 import csv
 import pymysql
+import re
 
 DB = {
     "host": "127.0.0.1",
@@ -72,6 +73,15 @@ def parse_grc(path):
         loads.append({h: (r[idx] if idx < len(r) else "") for idx, h in enumerate(header)})
     return meta, loads
 
+
+
+def normalize_code(x: str) -> str:
+    x = (x or "").strip().upper()
+    # remove spaces, hyphens, underscores and anything not A-Z/0-9
+    x = re.sub(r'[^A-Z0-9]', '', x)
+    return x
+
+
 # ---------- get-or-create IDs (no duplicates) ----------
 def get_or_create_cart(cur, cart_code):
     cart_code = s(cart_code)
@@ -82,18 +92,63 @@ def get_or_create_cart(cur, cart_code):
     cur.execute("INSERT INTO Cart (Cart_Code, Cart_Name) VALUES (%s,%s)", (cart_code, "Unknown Cart"))
     return cur.lastrowid
 
-def get_or_create_storloc(cur, bin_code):
-    bin_code = s(bin_code)
-    cur.execute("SELECT StorLoc_ID FROM Storage_Location WHERE Bin_Code=%s", (bin_code,))
+# def get_or_create_storloc(cur, bin_code):
+#     bin_code = s(bin_code)
+#     cur.execute("SELECT StorLoc_ID FROM Storage_Location WHERE Bin_Code=%s", (bin_code,))
+#     row = cur.fetchone()
+#     if row:
+#         return row["StorLoc_ID"]
+#     # Bin_Capacity is NOT NULL -> must set 0
+#     cur.execute(
+#         "INSERT INTO Storage_Location (Bin_Code, Bin_Name, Bin_Capacity) VALUES (%s,%s,%s)",
+#         (bin_code, "Unknown Bin", 0),
+#     )
+#     return cur.lastrowid
+
+
+def get_or_create_storloc_from_destination(cur, destination):
+    destination_raw = s(destination)
+    if not destination_raw:
+        return None
+
+    dest_code = normalize_code(destination_raw)
+
+    # 1) match normalized destination against normalized Bin_Code
+    cur.execute("""
+        SELECT StorLoc_ID
+        FROM Storage_Location
+        WHERE UPPER(REPLACE(REPLACE(REPLACE(Bin_Code,'-',''),'_',''),' ','')) = %s
+        LIMIT 1
+    """, (dest_code,))
     row = cur.fetchone()
     if row:
         return row["StorLoc_ID"]
-    # Bin_Capacity is NOT NULL -> must set 0
+
+    # 2) match destination text to Bin_Name (exact)
     cur.execute(
-        "INSERT INTO Storage_Location (Bin_Code, Bin_Name, Bin_Capacity) VALUES (%s,%s,%s)",
-        (bin_code, "Unknown Bin", 0),
+        "SELECT StorLoc_ID FROM Storage_Location WHERE Bin_Name=%s LIMIT 1",
+        (destination_raw,),
+    )
+    row = cur.fetchone()
+    if row:
+        return row["StorLoc_ID"]
+
+    # 3) not found -> insert using normalized code
+    cur.execute(
+        """
+        INSERT INTO Storage_Location (Bin_Code, Bin_Name, Bin_Capacity)
+        VALUES (%s, %s, 0)
+        """,
+        (dest_code, destination_raw),
     )
     return cur.lastrowid
+
+
+
+
+
+
+
 
 def get_or_create_grower(cur, grower_name):
     grower_name = s(grower_name)
@@ -253,7 +308,7 @@ def main():
         with conn.cursor() as cur:
             # Defaults
             cart_id = get_or_create_cart(cur, DEFAULT_CART_CODE)
-            stor_id = get_or_create_storloc(cur, DEFAULT_BIN_CODE)
+            #stor_id = get_or_create_storloc(cur, DEFAULT_BIN_CODE)
             conn.commit()
 
             files = [fn for fn in os.listdir(GRC_FOLDER) if fn.lower().endswith(".grc")]
@@ -311,6 +366,8 @@ def main():
                     note_parts = []
                     truck = s(l.get("TruckID"))
                     dest = s(l.get("Destination"))
+                    storloc_id = get_or_create_storloc_from_destination(cur, dest)
+
                     if truck:
                         note_parts.append(f"TruckID={truck}")
                     if dest:
@@ -322,7 +379,7 @@ def main():
                         "Field_ID": field_id,
                         "Crop_ID": crop_id,
                         "Dpt_ID": dpt_id,
-                        "StorLoc_ID": stor_id,
+                        "StorLoc_ID": storloc_id,
                         "Load_Num": load_num,
                         "Harvest_Date": harvest_date if harvest_date else None,
                         "MC": mc,
