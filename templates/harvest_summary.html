@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Harvest Summary | GMS</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+<div class="container py-4">
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="mb-0">Harvest Summary</h1>
+
+    <div class="d-flex gap-2">
+      <a
+        href="{{ url_for('harvest_query', field_id=selected_field, storloc_id=selected_storage) }}"
+        class="btn btn-outline-secondary"
+      >
+        Back to Harvest Query
+      </a>
+      <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Home</a>
+    </div>
+  </div>
+
+  <div class="table-responsive bg-white border rounded">
+    <table class="table table-striped table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Field</th>
+          <th class="text-end">Acres</th>
+          <th class="text-end">Total Weight (lbs wet)</th>
+          <th class="text-end">Total Dry Bushels</th>
+          <th class="text-end">Avg MC%</th>
+          <th class="text-end">Bu/Acre</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.Field_Name }}</td>
+          <td class="text-end">{{ "{:,.1f}".format(r.Acres) if r.Acres is not none else "-" }}</td>
+          <td class="text-end">{{ "{:,.0f}".format(r.total_lbs_wet) if r.total_lbs_wet is not none else "-" }}</td>
+          <td class="text-end">{{ "{:,.1f}".format(r.total_dry_bushels) if r.total_dry_bushels is not none else "-" }}</td>
+          <td class="text-end">{{ "{:.1f}".format(r.avg_mc) if r.avg_mc is not none else "-" }}</td>
+          <td class="text-end">{{ "{:,.1f}".format(r.bu_per_acre) if r.bu_per_acre is not none else "-" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+
+      <tfoot>
+        <tr class="table-light fw-semibold">
+          <td>Totals</td>
+          <td class="text-end">—</td>
+          <td class="text-end">{{ "{:,.0f}".format(totals.total_lbs_wet) }}</td>
+          <td class="text-end">{{ "{:,.1f}".format(totals.total_dry_bushels) }}</td>
+          <td class="text-end">{{ "{:.1f}".format(totals.avg_mc) if totals.avg_mc is not none else "-" }}</td>
+          <td class="text-end">—</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+</div>
+</body>
+</html>

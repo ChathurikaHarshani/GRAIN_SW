@@ -13,6 +13,36 @@
     <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Home</a>
   </div>
 
+
+
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  
+  <!-- <h1 class="mb-0">Harvest Query</h1>-->
+
+  <div class="d-flex gap-2">
+    <a
+      href="{{ url_for('harvest_summary', field_id=selected_field, storloc_id=selected_storage) }}"
+      class="btn btn-outline-primary"
+    >
+      Harvest Summary
+    </a>
+
+    <!-- <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Home</a>-->
+  </div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
   <!-- Filter bar (Field + Storage dropdowns like Excel idea) -->
   <form method="get" class="row g-2 align-items-end">
     <div class="col-md-4">

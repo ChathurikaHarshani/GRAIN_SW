@@ -3,131 +3,24 @@
 <head>
   <meta charset="utf-8">
   <title>Reconcile | GMS</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
-
 <body class="bg-light">
 <div class="container py-4">
 
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="mb-0">Reconcile</h1>
-    <a href="{{ url_for('reports') }}" class="btn btn-outline-secondary">Back to Reports</a>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Home</a>
   </div>
 
-  <!-- Filters -->
-  <form method="get" class="row g-2 align-items-end mb-4">
-    <div class="col-md-3">
-      <label class="form-label">Start</label>
-      <input type="date" class="form-control" name="start" value="{{ start_date }}">
-    </div>
-    <div class="col-md-3">
-      <label class="form-label">End</label>
-      <input type="date" class="form-control" name="end" value="{{ end_date }}">
-    </div>
-    <div class="col-md-4">
-      <label class="form-label">Crop (optional)</label>
-      <select class="form-select" name="crop_id">
-        <option value="">All Crops</option>
-        {% for c in crops %}
-          <option value="{{ c.Crop_ID }}" {% if selected_crop_id|string == c.Crop_ID|string %}selected{% endif %}>
-            {{ c.Crop_Code }} - {{ c.Crop_Name }}
-          </option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="col-md-2">
-      <button class="btn btn-primary w-100" type="submit">Apply</button>
-    </div>
-  </form>
-
-  <!-- Summary Cards -->
-  <div class="row g-3 mb-4">
-    <div class="col-md-4">
-      <div class="bg-white border rounded p-3 h-100">
-        <div class="text-muted">Harvest Totals</div>
-        <div>Rows: <strong>{{ harvest_sum.harvest_rows or 0 }}</strong></div>
-        <div>Avg MC: <strong>{{ "{:,.1f}".format(harvest_sum.harvest_avg_mc or 0) }}</strong></div>
-        <div>Lbs Wet: <strong>{{ "{:,.0f}".format(harvest_sum.harvest_lbs_wet or 0) }}</strong></div>
-        <div>Bushels: <strong>{{ "{:,.1f}".format(harvest_sum.harvest_bushels or 0) }}</strong></div>
-      </div>
-    </div>
-
-    <div class="col-md-4">
-      <div class="bg-white border rounded p-3 h-100">
-        <div class="text-muted">Delivery Totals</div>
-        <div>Rows: <strong>{{ delivery_sum.delivery_rows or 0 }}</strong></div>
-        <div>Avg MC: <strong>{{ "{:,.1f}".format(delivery_sum.delivery_avg_mc or 0) }}</strong></div>
-        <div>Lbs Wet: <strong>{{ "{:,.0f}".format(delivery_sum.delivery_lbs_wet or 0) }}</strong></div>
-        <div>Bushels: <strong>{{ "{:,.1f}".format(delivery_sum.delivery_bushels or 0) }}</strong></div>
-      </div>
-    </div>
-
-    <div class="col-md-4">
-      <div class="bg-white border rounded p-3 h-100">
-        <div class="text-muted">Difference (Delivery - Harvest)</div>
-        <div>Avg MC Δ: <strong>{{ "{:,.2f}".format(diff.avg_mc or 0) }}</strong></div>
-        <div>Lbs Wet Δ: <strong>{{ "{:,.0f}".format(diff.lbs_wet or 0) }}</strong></div>
-        <div>Bushels Δ: <strong>{{ "{:,.1f}".format(diff.bushels or 0) }}</strong></div>
-        <hr>
-        <div>Net Sale: <strong>${{ "{:,.2f}".format(delivery_sum.delivery_net_sale or 0) }}</strong></div>
-      </div>
-    </div>
+  <div class="alert alert-info">
+    Reconciliation compares <strong>Harvest</strong> and <strong>Delivery</strong> records
+    to identify differences in bushels, weight, moisture, and sales.
   </div>
 
-  <!-- Load-level reconciliation -->
-  <div class="table-responsive bg-white border rounded">
-    <table class="table table-striped table-hover mb-0 align-middle">
-      <thead>
-        <tr>
-          <th>Load</th>
-          <th>Harvest Date</th>
-          <th>Field</th>
-          <th>Harvest Storage</th>
-          <th>Crop</th>
-          <th>Harvest Bu</th>
-          <th>Delivery Date</th>
-          <th>Delivered To</th>
-          <th>Delivery Bu</th>
-          <th>Bu Δ</th>
-          <th>Lbs Δ</th>
-          <th>Net Sale</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in rows %}
-        <tr>
-          <td>{{ r.load_key }}</td>
-          <td>{{ r.harvest_date or "-" }}</td>
-          <td>{{ r.field_name or "-" }}</td>
-          <td>{{ r.harvest_storage or "-" }}</td>
-          <td>{{ r.crop_code or "-" }}</td>
-          <td>{{ "{:,.1f}".format(r.harvest_bushels or 0) }}</td>
-          <td>{{ r.delivery_date or "-" }}</td>
-          <td>{{ r.delivered_to or "-" }}</td>
-          <td>{{ "{:,.1f}".format(r.delivery_bushels or 0) }}</td>
-          <td>{{ "{:,.1f}".format(r.bushel_diff or 0) }}</td>
-          <td>{{ "{:,.0f}".format(r.lbs_diff or 0) }}</td>
-          <td>${{ "{:,.2f}".format(r.net_sale or 0) }}</td>
-          <td>
-            {% if r.delivery_date is none %}
-              <span class="badge text-bg-warning">Harvest Only</span>
-            {% elif r.harvest_date is none %}
-              <span class="badge text-bg-danger">Delivery Only</span>
-            {% else %}
-              <span class="badge text-bg-success">Matched</span>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  {% if not rows %}
-    <p class="mt-3 text-muted">No records found for the selected filters.</p>
-  {% endif %}
+  <p class="text-muted">
+    Reconciliation logic will be added here.
+  </p>
 
 </div>
 </body>

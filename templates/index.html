@@ -63,9 +63,32 @@
           </ul>
         </li>
 
-        <li class="nav-item"><a class="nav-link" href="#">Harvest</a></li>
+        <!--<li class="nav-item"><a class="nav-link" href="#">Harvest</a></li>--->
         <li class="nav-item"><a class="nav-link" href="{{ url_for('pace') }}">Pace</a></li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('reports') }}">Reports</a></li>
+        <!--<li class="nav-item"><a class="nav-link" href="{{ url_for('reports') }}">Reports</a></li>--->
+
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle"
+            href="#"
+            id="insertDataDropdown"
+            role="button"
+            data-bs-toggle="dropdown"
+            aria-expanded="false">
+            Reports
+          </a>
+
+          <ul class="dropdown-menu" aria-labelledby="insertDataDropdown">
+            <li><a class="dropdown-item" href="{{ url_for('billing') }}">Billing</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('harvest_query') }}">Harvest Query</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('delivery') }}">Delivery</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('reconcile') }}">Reconcile</a></li>
+          </ul>
+        </li>
+
+
+
+
+        <li class="nav-item"><a class="nav-link" href="#">Yield</a></li>
         <li class="nav-item"><a class="nav-link" href="#">Inventory</a></li>
         <li class="nav-item"><a class="nav-link" href="#">Settings</a></li>
 
@@ -78,10 +101,12 @@
 
 <header class="py-5 bg-light border-bottom">
   <div class="container">
+    <!--
     <h1 class="display-5 mb-2">Grain Management Software</h1>
     <p class="lead text-muted">Start here. This is your main landing page—add links to modules as you build them.</p>
     <a class="btn btn-primary me-2" href="/health">Check Health</a>
     <a class="btn btn-outline-secondary" href="#">Get Started</a>
+    --->
   </div>
 </header>
 
@@ -118,6 +143,7 @@
 
 
     <!-- Harvest Loads -->
+     <!--
     <div class="col-md-3">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
@@ -128,8 +154,6 @@
       </div>
     </div>
 
-
-    <!-- 
     <div class="col-md-3">
       <div class="card h-100 shadow-sm">
         <div class="card-body">

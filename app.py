@@ -88,6 +88,26 @@ def dashboard():
 
 
 
+
+
+def calculate_bushels(gross_val, tare_val, mc_val, wpb, base_mc):
+    if gross_val is None or wpb is None or wpb == 0:
+        return None
+    tare_val = tare_val or 0.0
+    net_lbs = gross_val - tare_val
+    wet_bu = net_lbs / wpb
+    if mc_val is not None and base_mc is not None and mc_val > base_mc:
+        return round(wet_bu * ((100.0 - mc_val) / (100.0 - base_mc)), 2)
+    return round(wet_bu, 2)
+
+
+
+
+
+
+
+
+
 # ----------------- Grower: list + create ----------------- #
 @app.route("/growers")
 #@login_required
@@ -532,7 +552,7 @@ def harvest_query():
         storloc_id = request.form.get("storloc_id", "").strip()
         crop_id = request.form.get("crop_id", "").strip()
         cart_id = request.form.get("cart_id", "").strip()
-
+        bushels_val = request.form.get("Bushels", "").strip()
         mc = request.form.get("mc", "").strip()
         gross = request.form.get("gross", "").strip()
         tare = request.form.get("tare", "").strip()
@@ -549,18 +569,31 @@ def harvest_query():
             else:
                 dpt_id = row["Dpt_ID"]
 
-                # Weight per bushel for bushel calculation
-                cur.execute("SELECT Weight_PerBushel FROM Crop WHERE Crop_ID=%s;", (crop_id,))
+                # # Weight per bushel for bushel calculation
+                # cur.execute("SELECT Weight_PerBushel FROM Crop WHERE Crop_ID=%s;", (crop_id,))
+                # crop_row = cur.fetchone()
+                # wpb = float(crop_row["Weight_PerBushel"]) if crop_row and crop_row["Weight_PerBushel"] else None
+
+
+
+                # Weight per bushel + Base moisture for Excel-like bushels calculation
+                cur.execute("SELECT Weight_PerBushel, Base_MC FROM Crop WHERE Crop_ID=%s;", (crop_id,))
                 crop_row = cur.fetchone()
-                wpb = float(crop_row["Weight_PerBushel"]) if crop_row and crop_row["Weight_PerBushel"] else None
+                wpb = float(crop_row["Weight_PerBushel"]) if crop_row and crop_row["Weight_PerBushel"] is not None else None
+                base_mc = float(crop_row["Base_MC"]) if crop_row and crop_row["Base_MC"] is not None else None
+
+
 
                 gross_val = float(gross) if gross else None
                 tare_val = float(tare) if tare else 0.0
                 mc_val = float(mc) if mc else None
 
-                bushels_val = None
-                if wpb and gross_val is not None:
-                    bushels_val = (gross_val - tare_val) / wpb
+                # bushels_val = None
+                # if wpb and gross_val is not None:
+                #     bushels_val = (gross_val - tare_val) / wpb
+
+
+
 
                 cur2 = conn.cursor()
                 cur2.execute("""
@@ -654,6 +687,76 @@ def harvest_query():
         lbs_wet=lbs_wet,
         bu_wet=bu_wet,
         dry_bushels=bushels_sum
+    )
+
+
+@app.route("/harvest-summary", methods=["GET"])
+@login_required
+def harvest_summary():
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+
+    # reuse the same filters as harvest_query
+    selected_field = request.args.get("field_id", "")
+    selected_storage = request.args.get("storloc_id", "")
+
+    where = []
+    params = []
+
+    if selected_field:
+        where.append("h.Field_ID = %s")
+        params.append(selected_field)
+
+    if selected_storage:
+        where.append("h.StorLoc_ID = %s")
+        params.append(selected_storage)
+
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    # Summary by Field (includes Acres)
+    cur.execute(f"""
+        SELECT
+          f.Field_ID,
+          f.Field_Name,
+          f.Acres,
+          SUM(COALESCE(h.Gross_Weight,0) - COALESCE(h.Tare_Weight,0)) AS total_lbs_wet,
+          SUM(COALESCE(h.Bushels,0)) AS total_dry_bushels,
+          AVG(h.MC) AS avg_mc
+        FROM Harvest h
+        JOIN Field f ON h.Field_ID = f.Field_ID
+        {where_sql}
+        GROUP BY f.Field_ID, f.Field_Name, f.Acres
+        ORDER BY f.Field_Name;
+    """, tuple(params))
+
+    rows = cur.fetchall()
+
+    # Add bu/acre in python (safe division)
+    for r in rows:
+        acres = r.get("Acres")
+        dry_bu = r.get("total_dry_bushels") or 0
+        if acres and float(acres) > 0:
+            r["bu_per_acre"] = float(dry_bu) / float(acres)
+        else:
+            r["bu_per_acre"] = None
+
+    # Grand totals (optional but useful)
+    totals = {
+        "total_lbs_wet": sum(_to_float(r.get("total_lbs_wet")) for r in rows),
+        "total_dry_bushels": sum(_to_float(r.get("total_dry_bushels")) for r in rows),
+    }
+    mc_vals = [r.get("avg_mc") for r in rows if r.get("avg_mc") is not None]
+    totals["avg_mc"] = (sum(_to_float(x) for x in mc_vals) / len(mc_vals)) if mc_vals else None
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "harvest_summary.html",
+        rows=rows,
+        totals=totals,
+        selected_field=selected_field,
+        selected_storage=selected_storage
     )
 
 
@@ -864,6 +967,11 @@ def reports():
     return render_template("reports.html")
 
 
+@app.route("/reconcile")
+@login_required
+def reconcile():
+    return render_template("reconcile.html")
+
 
 
 
@@ -874,9 +982,9 @@ def _f(x):
         return float(x)
     return float(x)
 
-@app.route("/reconcile", methods=["GET"])
+@app.route("/delivery", methods=["GET"])
 @login_required
-def reconcile():
+def delivery():
     # filters
     start = request.args.get("start")
     end = request.args.get("end")
@@ -1040,7 +1148,7 @@ def reconcile():
     conn.close()
 
     return render_template(
-        "reconcile.html",
+        "delivery.html",
         crops=crops,
         selected_crop_id=crop_id,
         start_date=start_date,
