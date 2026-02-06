@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request, redirect, url_for , session
+from flask import Flask, render_template, jsonify, request, redirect, url_for, session, abort
 from db import get_conn
 from datetime import date, timedelta
 from decimal import Decimal
@@ -6,7 +6,14 @@ import calendar
 from functools import wraps
 from dotenv import load_dotenv
 import os
-# from slingshot_client import get_jobdata_summary   # keep commented for now
+import bcrypt
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+import pymysql
+
+
+
+
+
 
 app = Flask(__name__)
 
@@ -15,47 +22,160 @@ app.secret_key = os.getenv("SECRET_KEY", "dev-secret-change-me")
 
 @app.route("/")
 def landing():
-    # If already logged in, go to dashboard
-    if session.get("logged_in"):
+    if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
     return render_template("landing.html")
 
 
 
 
-def login_required(view_func):
-    @wraps(view_func)
-    def wrapper(*args, **kwargs):
-        if not session.get("logged_in"):
-            return redirect(url_for("login"))
-        return view_func(*args, **kwargs)
-    return wrapper
+login_manager = LoginManager()
+login_manager.login_view = "login"
+login_manager.init_app(app)
+
+
+class User(UserMixin):
+    def __init__(self, row):
+        self.id = row["id"]
+        self.username = row["username"]
+        self.role = row["role"]
+        self.password_hash = row["password_hash"]
+        self._active = bool(row.get("is_active", 1))
+
+    @property
+    def is_admin(self):
+        return self.role == "admin"
+
+    def is_active(self):
+        return self._active
+
+    
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM users WHERE id=%s AND is_active=1", (user_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return User(row) if row else None
 
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if session.get("logged_in"):
+    if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
 
     error = None
     if request.method == "POST":
-        username = request.form.get("username", "")
+        username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
 
-        if username == os.getenv("APP_USERNAME") and password == os.getenv("APP_PASSWORD"):
-            session["logged_in"] = True
-            session["username"] = username
-            return redirect(url_for("dashboard"))
-        else:
-            error = "Invalid username or password."
+        conn = get_conn()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM users WHERE username=%s AND is_active=1", (username,))
+        user_row = cur.fetchone()
+        cur.close()
+        conn.close()
 
-    return render_template("loging.html", error=error)
+        if not user_row or not bcrypt.checkpw(
+            password.encode(), user_row["password_hash"].encode()
+        ):
+            error = "Invalid username or password"
+        else:
+            login_user(User(user_row))
+            return redirect(url_for("dashboard"))
+
+    return render_template("login.html", error=error)
+
+
+
+
+
 
 @app.route("/logout")
+@login_required
 def logout():
-    session.clear()
+    logout_user()
     return redirect(url_for("landing"))
+
+
+
+def admin_required(view):
+    @wraps(view)
+    @login_required
+    def wrapper(*args, **kwargs):
+        if not current_user.is_admin:
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapper
+
+
+
+
+
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    # if already logged in, go to dashboard
+    if current_user.is_authenticated:
+        return redirect(url_for("dashboard"))
+
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        confirm  = request.form.get("confirm_password", "")
+
+        if not username:
+            error = "Username is required."
+        elif password != confirm:
+            error = "Passwords do not match."
+        elif len(password) < 6:
+            error = "Password must be at least 6 characters."
+        else:
+            pw_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+            conn = get_conn()
+            cur = conn.cursor(dictionary=True)
+            # check existing user
+            cur.execute("SELECT id FROM users WHERE username=%s", (username,))
+            exists = cur.fetchone()
+
+            if exists:
+                error = "Username already exists. Please choose another."
+                cur.close(); conn.close()
+            else:
+                cur2 = conn.cursor()
+                cur2.execute("""
+                    INSERT INTO users (username, password_hash, role, is_active)
+                    VALUES (%s, %s, 'user', 1)
+                """, (username, pw_hash))
+                conn.commit()
+                cur2.close()
+                cur.close()
+                conn.close()
+
+                return redirect(url_for("login"))
+
+    return render_template("signup.html", error=error)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -82,7 +202,6 @@ def health():
 
 
 @app.route("/app")
-@login_required
 def dashboard():
     return render_template("index.html", app_name="GMS")
 
@@ -110,7 +229,6 @@ def calculate_bushels(gross_val, tare_val, mc_val, wpb, base_mc):
 
 # ----------------- Grower: list + create ----------------- #
 @app.route("/growers")
-#@login_required
 def list_growers():
     """Show all growers in a table."""
     conn = get_conn()
@@ -123,7 +241,6 @@ def list_growers():
 
 
 @app.route("/growers/new", methods=["GET", "POST"])
-#@login_required
 def new_grower():
     """Form to add a new grower."""
     if request.method == "POST":
@@ -152,7 +269,6 @@ def new_grower():
 # ----------------- Department: list + create ----------------- #
 
 @app.route("/departments")
-@login_required
 def list_departments():
     """Show all departments."""
     conn = get_conn()
@@ -171,7 +287,6 @@ def list_departments():
 
 
 @app.route("/departments/new", methods=["GET", "POST"])
-@login_required
 def new_department():
     """Create a new department with Grower dropdown."""
     conn = get_conn()
@@ -213,7 +328,6 @@ def new_department():
 # ----------------- Field: list + create ----------------- #
 
 @app.route("/fields")
-@login_required
 def list_fields():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -230,7 +344,6 @@ def list_fields():
     return render_template("fields.html", fields=fields)
 
 @app.route("/fields/new", methods=["GET", "POST"])
-@login_required
 def new_field():
     conn = get_conn()
 
@@ -277,7 +390,6 @@ def new_field():
 # ----------------- Cart: list + create ----------------- #
 
 @app.route("/carts")
-@login_required
 def list_carts():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -288,7 +400,6 @@ def list_carts():
     return render_template("carts.html", carts=carts)
 
 @app.route("/carts/new", methods=["GET", "POST"])
-@login_required
 def new_cart():
     if request.method == "POST":
         cart_code = request.form.get("cart_code", "").strip()
@@ -315,7 +426,6 @@ def new_cart():
 # ----------------- Crop: list + create ----------------- #
 
 @app.route("/crops")
-@login_required
 def list_crops():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -357,7 +467,6 @@ def new_crop():
 # ----------------- Storage Location: list + create ----------------- #
 
 @app.route("/storage")
-@login_required
 def list_storage():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -373,7 +482,6 @@ def list_storage():
     return render_template("storage.html", storage=rows)
 
 @app.route("/storage/new", methods=["GET", "POST"])
-@login_required
 def new_storage():
     if request.method == "POST":
         bin_code = request.form.get("bin_code", "").strip()
@@ -421,7 +529,6 @@ def new_storage():
 # ----------------- Delivery Location: list + create ----------------- #
 
 @app.route("/delivery-locations")
-@login_required
 def list_delivery_locations():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -436,7 +543,6 @@ def list_delivery_locations():
     return render_template("delivery_locations.html", locations=rows)
 
 @app.route("/delivery-locations/new", methods=["GET", "POST"])
-@login_required
 def new_delivery_location():
     if request.method == "POST":
         code = request.form.get("delloc_code", "").strip()
@@ -463,7 +569,6 @@ def new_delivery_location():
 # ----------------- Market Price Monthly: list + create ----------------- #
 
 @app.route("/market-prices")
-@login_required
 def list_market_prices():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -479,7 +584,6 @@ def list_market_prices():
     return render_template("market_prices.html", prices=rows)
 
 @app.route("/market-prices/new", methods=["GET", "POST"])
-@login_required
 def new_market_price():
     conn = get_conn()
 
@@ -520,7 +624,6 @@ def new_market_price():
 # ----------------- Harvest Query: filter + add ----------------- #
 
 @app.route("/harvest-query", methods=["GET", "POST"])
-@login_required
 def harvest_query():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -691,7 +794,6 @@ def harvest_query():
 
 
 @app.route("/harvest-summary", methods=["GET"])
-@login_required
 def harvest_summary():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -762,7 +864,6 @@ def harvest_summary():
 
 
 @app.route("/pace")
-@login_required
 def pace():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -851,7 +952,6 @@ def _month_name_to_num(name: str) -> int:
     return months.get(name, 0)
 
 @app.route("/billing", methods=["GET"])
-@login_required
 def billing():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -962,13 +1062,12 @@ def billing():
 
 
 @app.route("/reports")
-@login_required
 def reports():
     return render_template("reports.html")
 
 
 @app.route("/reconcile")
-@login_required
+#@login_required
 def reconcile():
     return render_template("reconcile.html")
 
@@ -983,7 +1082,6 @@ def _f(x):
     return float(x)
 
 @app.route("/delivery", methods=["GET"])
-@login_required
 def delivery():
     # filters
     start = request.args.get("start")
