@@ -5,18 +5,18 @@
 {% block content %}
 
 <div class="container py-4">
-  <h1 class="mb-4 text-white">Add Cart</h1>
+  <h1 class="mb-4 ">Add Cart</h1>
   <a href="{{ url_for('list_carts') }}" class="btn btn-link">&larr; Back to Carts</a>
 
   {% if error %}<div class="alert alert-danger mt-3">{{ error }}</div>{% endif %}
 
   <form method="post" class="mt-3">
     <div class="mb-3">
-      <label class="form-label text-white">Cart Code</label>
+      <label class="form-label ">Cart Code</label>
       <input type="text" class="form-control" name="cart_code" required>
     </div>
     <div class="mb-3">
-      <label class="form-label text-white">Cart Name</label>
+      <label class="form-label ">Cart Name</label>
       <input type="text" class="form-control" name="cart_name" required>
     </div>
     <button type="submit" class="btn btn-primary">Save</button>

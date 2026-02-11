@@ -6,22 +6,22 @@
 <div class="container py-4">
 
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="mb-0 text-white">Pace</h1>
+    <h1 class="mb-0 ">Pace</h1>
     <!-- <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Home</a> -->
   </div>
 
-  <div class="mb-3  text-white">
+  <div class="mb-3  ">
     <strong>1st Harvest Date:</strong> {{ first_date or "-" }}
   </div>
 
   <!-- Date range filter -->
   <form method="get" class="row g-2 align-items-end mb-4">
     <div class="col-md-4">
-      <label class="form-label text-white">Start</label>
+      <label class="form-label ">Start</label>
       <input type="date" class="form-control" name="start" value="{{ start_date }}">
     </div>
     <div class="col-md-4">
-      <label class="form-label text-white">End</label>
+      <label class="form-label ">End</label>
       <input type="date" class="form-control" name="end" value="{{ end_date }}">
     </div>
     <div class="col-md-4">

@@ -12,26 +12,68 @@
   <link href="{{ url_for('static', filename='styles.css') }}" rel="stylesheet">
 
   <style>
-    body {
-      background: url("{{ url_for('static', filename='images/landing.png') }}") center/cover no-repeat fixed;
-      position: relative;
+    /* ===== Background like the design you shared ===== */
+    body{
       min-height: 100vh;
+      background: radial-gradient(circle at 20% 10%, #e9f3ff 0%, transparent 40%),
+                  radial-gradient(circle at 80% 20%, #e7ffe8 0%, transparent 45%),
+                  linear-gradient(135deg, #dce7f3, #d8f3c9);
+      display: flex;
+      flex-direction: column;
     }
 
-    /* Dark overlay for readability */
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.45);
-      z-index: -1;
+    /* remove dark overlay from previous version */
+    body::before{ content:none; }
+
+    /* ===== Floating app shell (glass) ===== */
+    .app-shell{
+      background: rgba(255,255,255,0.78);
+      border: 1px solid rgba(255,255,255,0.55);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border-radius: 28px;
+      box-shadow: 0 30px 70px rgba(0,0,0,0.12);
+      padding: 28px;
     }
 
-    /* Make main content readable */
-    .main-content {
-      background: rgba(255,255,255,0.95);
-      border-radius: 12px;
-      padding: 30px;
+    /* Your content cards inside shell */
+    .main-content{
+      background: rgba(255,255,255,0.92);
+      border: 1px solid rgba(0,0,0,0.06);
+      border-radius: 18px;
+      padding: 24px;
+      box-shadow: 0 12px 26px rgba(0,0,0,0.08);
+    }
+
+    /* Softer navbar (floating + transparent) */
+    .navbar{
+      background: transparent !important;
+      box-shadow: none !important;
+      padding-top: 14px;
+      padding-bottom: 14px;
+    }
+
+    /* Make nav links visible on bright bg */
+    .navbar .nav-link,
+    .navbar .navbar-brand{
+      color: rgba(0,0,0,0.78) !important;
+    }
+
+    .navbar .nav-link:hover{
+      color: rgba(0,0,0,0.95) !important;
+    }
+
+    /* dropdown menu styling */
+    .dropdown-menu{
+      border-radius: 14px;
+      border: 1px solid rgba(0,0,0,0.08);
+      box-shadow: 0 18px 40px rgba(0,0,0,0.10);
+    }
+
+    /* Footer lighter (optional) */
+    footer{
+      background: transparent !important;
+      color: rgba(0,0,0,0.55) !important;
     }
   </style>
 </head>
@@ -39,7 +81,7 @@
 <body class="d-flex flex-column min-vh-100">
 
   <!-- ================= NAVBAR ================= -->
-  <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <nav class="navbar navbar-expand-lg">
     <div class="container">
       <a class="navbar-brand fw-bold" href="{{ url_for('dashboard') }}">GMS</a>
 
@@ -100,7 +142,6 @@
             </ul>
           </li>
 
-          <!-- ✅ Change these from # to real pages -->
           <li class="nav-item"><a class="nav-link" href="{{ url_for('yield_report') }}">Yield</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('inventory_report') }}">Inventory</a></li>
 
@@ -134,12 +175,14 @@
   <!-- ================= MAIN CONTENT ================= -->
   <main class="flex-fill">
     <div class="container py-4">
-      {% block content %}{% endblock %}
+      <div class="app-shell">
+        {% block content %}{% endblock %}
+      </div>
     </div>
   </main>
 
-  <!-- ================= FOOTER (STICKY) ================= -->
-  <footer class="bg-dark text-white-50 py-3 mt-auto">
+  <!-- ================= FOOTER ================= -->
+  <footer class="py-3 mt-auto">
     <div class="container text-center small">
       © 2025 GMS
     </div>

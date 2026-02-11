@@ -4,7 +4,7 @@
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h2 class="mb-0 text-white">Yield </h2>
+  <h2 class="mb-0 ">Yield </h2>
 
   <a class="btn btn-success"
      href="{{ url_for('yield_export',
@@ -20,27 +20,27 @@
 <!-- Filters -->
 <form method="GET" class="row g-3 mb-4">
   <div class="col-md-2">
-    <label class="form-label text-white">Crop Year</label>
+    <label class="form-label ">Crop Year</label>
     <input type="number" name="crop_year" class="form-control" value="{{ active_filters.crop_year }}">
   </div>
 
   <div class="col-md-2">
-    <label class="form-label text-white">Grower</label>
+    <label class="form-label ">Grower</label>
     <input type="text" name="grower" class="form-control" value="{{ active_filters.grower }}">
   </div>
 
   <div class="col-md-2">
-    <label class="form-label text-white">Department</label>
+    <label class="form-label ">Department</label>
     <input type="text" name="department" class="form-control" value="{{ active_filters.department }}">
   </div>
 
   <div class="col-md-2">
-    <label class="form-label text-white">Field</label>
+    <label class="form-label ">Field</label>
     <input type="text" name="field" class="form-control" value="{{ active_filters.field }}">
   </div>
 
   <div class="col-md-2">
-    <label class="form-label text-white">Crop</label>
+    <label class="form-label ">Crop</label>
     <input type="text" name="crop" class="form-control" value="{{ active_filters.crop }}">
   </div>
 

@@ -3,9 +3,232 @@
 {% block title %}{{ app_name }} – Home{% endblock %}
 
 {% block content %}
-  <!-- your hero image / cards / content goes here -->
-  <div class="p-4 bg-light rounded">
-    <h1 class="mb-2">Welcome to GMS</h1>
-    <p class="text-muted mb-0">Manage growers, loads, delivery, and reports.</p>
+
+<!-- ================= HERO (TEXT + IMAGE) ================= -->
+<div class="main-content shadow-sm mb-5 gms-card">
+  <div class="row align-items-center g-4">
+
+    <!-- LEFT: TEXT -->
+    <div class="col-lg-6">
+      <h1 class="display-6 fw-bold mb-2">Welcome to GMS</h1>
+
+      <p class="text-muted mb-2">
+        Manage growers, loads, delivery, and reports in one system.
+      </p>
+
+      <p class="text-muted mb-3">
+        <strong>Grain Management Software (GMS)</strong> is a centralized platform for managing
+        grain deliveries, inventory, billing, and reconciliation.
+      </p>
+
+      <p class="text-muted mb-4">
+        It provides role-based secure access, automated reporting, and real-time inventory tracking
+        to improve operational efficiency and financial accuracy.
+      </p>
+
+      <div class="d-flex flex-wrap gap-2">
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary">
+          <i class="bi bi-speedometer2 me-1"></i> Dashboard
+        </a>
+        <a href="{{ url_for('delivery') }}" class="btn btn-outline-secondary">
+          <i class="bi bi-truck me-1"></i> Enter Delivery
+        </a>
+        <a href="{{ url_for('harvest_query') }}" class="btn btn-outline-dark">
+          <i class="bi bi-search me-1"></i> Harvest Query
+        </a>
+      </div>
+
+      <!-- QUICK ACTIONS -->
+      <div class="mt-4 pt-3 border-top">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+          <span class="text-muted small">Quick actions</span>
+
+          <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-sm btn-light border" href="{{ url_for('billing') }}">
+              <i class="bi bi-receipt me-1"></i> Billing
+            </a>
+            <a class="btn btn-sm btn-light border" href="{{ url_for('reconcile') }}">
+              <i class="bi bi-clipboard-check me-1"></i> Reconcile
+            </a>
+            <a class="btn btn-sm btn-light border" href="{{ url_for('inventory_report') }}">
+              <i class="bi bi-box-seam me-1"></i> Inventory
+            </a>
+            <a class="btn btn-sm btn-light border" href="{{ url_for('yield_report') }}">
+              <i class="bi bi-graph-up me-1"></i> Yield
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: IMAGE -->
+    <div class="col-lg-6">
+      <div class="rounded-4 overflow-hidden shadow-sm gms-hero-img">
+        <img
+          src="{{ url_for('static', filename='images/gms_home.jpg') }}"
+          alt="GMS"
+          class="img-fluid"
+          style="width:100%; height:360px; object-fit:cover;">
+      </div>
+      <small class="text-muted d-block mt-2">
+        Tip: Use a grain elevator / truck / scale photo for branding.
+      </small>
+    </div>
+
   </div>
+</div>
+
+<!-- ================= KPI ROW ================= -->
+<div class="row g-3 mb-4">
+  <div class="col-md-4">
+    <div class="main-content shadow-sm text-center h-100 gms-card kpi-card">
+      <div class="d-flex justify-content-center align-items-center gap-2 mb-1">
+        <i class="bi bi-bar-chart-line fs-4 text-primary"></i>
+        <h6 class="text-muted mb-0">Total Bushels (YTD)</h6>
+      </div>
+      <div class="kpi-number" id="kpiBushels">125,430</div>
+      <small class="text-muted">Sample value</small>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="main-content shadow-sm text-center h-100 gms-card kpi-card">
+      <div class="d-flex justify-content-center align-items-center gap-2 mb-1">
+        <i class="bi bi-people fs-4 text-primary"></i>
+        <h6 class="text-muted mb-0">Active Growers</h6>
+      </div>
+      <div class="kpi-number" id="kpiGrowers">38</div>
+      <small class="text-muted">Sample value</small>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="main-content shadow-sm text-center h-100 gms-card kpi-card">
+      <div class="d-flex justify-content-center align-items-center gap-2 mb-1">
+        <i class="bi bi-hourglass-split fs-4 text-primary"></i>
+        <h6 class="text-muted mb-0">Pending Deliveries</h6>
+      </div>
+      <div class="kpi-number" id="kpiPending">12</div>
+      <small class="text-muted">Sample value</small>
+    </div>
+  </div>
+</div>
+
+<!-- ================= FEATURE CARDS ================= -->
+<div class="row g-3 mb-4">
+  <div class="col-md-4">
+    <div class="main-content shadow-sm h-100 gms-card">
+      <div class="d-flex align-items-start gap-3">
+        <div class="gms-iconbox">
+          <i class="bi bi-truck fs-4"></i>
+        </div>
+        <div>
+          <h5 class="fw-bold mb-1">Delivery & Inventory</h5>
+          <p class="text-muted mb-0">
+            Track deliveries by location and maintain accurate inventory balances.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="main-content shadow-sm h-100 gms-card">
+      <div class="d-flex align-items-start gap-3">
+        <div class="gms-iconbox">
+          <i class="bi bi-receipt fs-4"></i>
+        </div>
+        <div>
+          <h5 class="fw-bold mb-1">Billing & Reconciliation</h5>
+          <p class="text-muted mb-0">
+            Generate billing summaries and reconcile bushels to identify discrepancies.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="main-content shadow-sm h-100 gms-card">
+      <div class="d-flex align-items-start gap-3">
+        <div class="gms-iconbox">
+          <i class="bi bi-shield-lock fs-4"></i>
+        </div>
+        <div>
+          <h5 class="fw-bold mb-1">Role-Based Access</h5>
+          <p class="text-muted mb-0">
+            Admin and user permissions for secure access and clean workflows.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= CHARTS ================= -->
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="main-content shadow-sm h-100 gms-card">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <h5 class="fw-bold mb-0">Monthly Delivered Bushels</h5>
+        <span class="badge text-bg-light border">Sample</span>
+      </div>
+      <canvas id="deliveriesChart" height="120"></canvas>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="main-content shadow-sm h-100 gms-card">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <h5 class="fw-bold mb-0">Inventory by Location</h5>
+        <span class="badge text-bg-light border">Sample</span>
+      </div>
+      <canvas id="inventoryChart" height="120"></canvas>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<!-- Bootstrap Icons -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+  new Chart(document.getElementById('deliveriesChart'), {
+    type: 'line',
+    data: {
+      labels: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
+      datasets: [{
+        label: 'Bushels',
+        data: [1200, 1500, 1800, 1600, 2100, 2400, 2200, 2000, 1900, 2300, 2500, 2700],
+        tension: 0.3
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: true } },
+      scales: { y: { beginAtZero: true } }
+    }
+  });
+
+  new Chart(document.getElementById('inventoryChart'), {
+    type: 'bar',
+    data: {
+      labels: ['ADM', 'Cargill', 'Frontier', 'Mead', 'Coop'],
+      datasets: [{
+        label: 'Inventory (bushels)',
+        data: [5200, 4100, 3600, 2800, 4500]
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: true } },
+      scales: { y: { beginAtZero: true } }
+    }
+  });
+</script>
 {% endblock %}

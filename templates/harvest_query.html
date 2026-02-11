@@ -6,7 +6,7 @@
 <div class="container py-4">
 
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="mb-0 text-white">Harvest Query</h1>
+    <h1 class="mb-0 ">Harvest Query</h1>
     <!-- <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Home</a> -->
   </div>
 
@@ -36,7 +36,7 @@
   <!-- Filter bar (Field + Storage dropdowns like Excel idea) -->
   <form method="get" class="row g-2 align-items-end">
     <div class="col-md-4">
-      <label class="form-label text-white">Field</label>
+      <label class="form-label ">Field</label>
       <select class="form-select" name="field_id">
         <option value="">-- All Fields --</option>
         {% for f in fields %}
@@ -48,7 +48,7 @@
     </div>
 
     <div class="col-md-4">
-      <label class="form-label text-white">Storage</label>
+      <label class="form-label ">Storage</label>
       <select class="form-select" name="storloc_id">
         <option value="">-- All Storage --</option>
         {% for s in storages %}
@@ -67,7 +67,7 @@
   <hr class="my-4">
 
   <!-- Add new load (Excel-like input row) -->
-  <h4 class="mb-3 text-white">Add Harvest Load</h4>
+  <h4 class="mb-3 ">Add Harvest Load</h4>
 
   {% if error %}
     <div class="alert alert-danger">{{ error }}</div>
@@ -75,17 +75,17 @@
 
   <form method="post" class="row g-2">
     <div class="col-md-2">
-      <label class="form-label text-white">Load</label>
+      <label class="form-label ">Load</label>
       <input class="form-control" name="load_num" required>
     </div>
 
     <div class="col-md-2">
-      <label class="form-label text-white">Date</label>
+      <label class="form-label ">Date</label>
       <input type="date" class="form-control" name="harvest_date" required>
     </div>
 
     <div class="col-md-3">
-      <label class="form-label text-white">Field</label>
+      <label class="form-label ">Field</label>
       <select class="form-select" name="field_id" required>
         <option value="">-- Select Field --</option>
         {% for f in fields %}
@@ -97,7 +97,7 @@
     </div>
 
     <div class="col-md-3">
-      <label class="form-label text-white">Storage</label>
+      <label class="form-label ">Storage</label>
       <select class="form-select" name="storloc_id" required>
         <option value="">-- Select Storage --</option>
         {% for s in storages %}
@@ -109,7 +109,7 @@
     </div>
 
     <div class="col-md-2">
-      <label class="form-label text-white">Crop</label>
+      <label class="form-label ">Crop</label>
       <select class="form-select" name="crop_id" required>
         <option value="">-- Select Crop --</option>
         {% for c in crops %}
@@ -119,7 +119,7 @@
     </div>
 
     <div class="col-md-2">
-      <label class="form-label text-white">Cart</label>
+      <label class="form-label ">Cart</label>
       <select class="form-select" name="cart_id" required>
         <option value="">-- Select Cart --</option>
         {% for c in carts %}
@@ -129,22 +129,22 @@
     </div>
 
     <div class="col-md-2">
-      <label class="form-label text-white">MC</label>
+      <label class="form-label ">MC</label>
       <input type="number" step="0.01" class="form-control" name="mc">
     </div>
 
     <div class="col-md-2">
-      <label class="form-label text-white">Gross</label>
+      <label class="form-label ">Gross</label>
       <input type="number" step="0.01" class="form-control" name="gross">
     </div>
 
     <div class="col-md-2">
-      <label class="form-label text-white">Tare</label>
+      <label class="form-label ">Tare</label>
       <input type="number" step="0.01" class="form-control" name="tare">
     </div>
 
     <div class="col-md-4">
-      <label class="form-label text-white">Note</label>
+      <label class="form-label ">Note</label>
       <input class="form-control" name="note">
     </div>
 
