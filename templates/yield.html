@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}Yield{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="mb-0 text-white">Yield </h2>
+
+  <a class="btn btn-success"
+     href="{{ url_for('yield_export',
+                      crop_year=active_filters.crop_year,
+                      grower=active_filters.grower,
+                      department=active_filters.department,
+                      field=active_filters.field,
+                      crop=active_filters.crop) }}">
+    Export to Excel
+  </a>
+</div>
+
+<!-- Filters -->
+<form method="GET" class="row g-3 mb-4">
+  <div class="col-md-2">
+    <label class="form-label text-white">Crop Year</label>
+    <input type="number" name="crop_year" class="form-control" value="{{ active_filters.crop_year }}">
+  </div>
+
+  <div class="col-md-2">
+    <label class="form-label text-white">Grower</label>
+    <input type="text" name="grower" class="form-control" value="{{ active_filters.grower }}">
+  </div>
+
+  <div class="col-md-2">
+    <label class="form-label text-white">Department</label>
+    <input type="text" name="department" class="form-control" value="{{ active_filters.department }}">
+  </div>
+
+  <div class="col-md-2">
+    <label class="form-label text-white">Field</label>
+    <input type="text" name="field" class="form-control" value="{{ active_filters.field }}">
+  </div>
+
+  <div class="col-md-2">
+    <label class="form-label text-white">Crop</label>
+    <input type="text" name="crop" class="form-control" value="{{ active_filters.crop }}">
+  </div>
+
+  <div class="col-md-2 d-flex align-items-end">
+    <button type="submit" class="btn btn-primary w-100">Apply</button>
+  </div>
+</form>
+
+<div class="table-responsive">
+  <table id="yieldTable" class="table table-bordered table-striped table-hover align-middle">
+    <thead class="table-dark">
+      <tr>
+        <th>Crop Year</th>
+        <th>Grower</th>
+        <th>Department</th>
+        <th>Field</th>
+        <th>Crop</th>
+        <th class="text-end">Acres</th>
+        <th class="text-end">Total Bushels</th>
+        <th class="text-end">Yield (bu/ac)</th>
+        <th class="text-end">Avg MC</th>
+        <th class="text-end">Wet Bushels</th>
+        <th class="text-end">Dry Bushels</th>
+        <th class="text-end">Dry Yield (bu/ac)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in results %}
+      <tr>
+        <td>{{ r.Crop_Year }}</td>
+        <td>{{ r.Grower_Name }}</td>
+        <td>{{ r.Department_Name }}</td>
+        <td>{{ r.Field_Name }}</td>
+        <td>{{ r.Crop_Name }}</td>
+        <td class="text-end">{{ r.Acres }}</td>
+        <td class="text-end">{{ r.Total_Bushels }}</td>
+        <td class="text-end"><strong>{{ r.Yield_bu_per_acre }}</strong></td>
+        <td class="text-end">{{ r.Avg_MC }}</td>
+        <td class="text-end">{{ r.Total_WetBushels }}</td>
+        <td class="text-end">{{ r.Total_DryBushels }}</td>
+        <td class="text-end"><strong>{{ r.Dry_Yield_bu_per_acre }}</strong></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- DataTables -->
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+
+<script>
+  $(function () {
+    $('#yieldTable').DataTable({
+      pageLength: 25,
+      order: [[0, 'desc']]
+    });
+  });
+</script>
+{% endblock %}

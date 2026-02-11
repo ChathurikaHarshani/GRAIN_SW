@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request, redirect, url_for, session, abort
+from flask import Flask, render_template, jsonify, request, redirect, url_for, session, abort,send_file
 from db import get_conn
 from datetime import date, timedelta
 from decimal import Decimal
@@ -9,6 +9,8 @@ import os
 import bcrypt
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 import pymysql
+from io import BytesIO
+import pandas as pd
 
 
 
@@ -1256,6 +1258,421 @@ def delivery():
         diff=diff,
         rows=rows
     )
+
+
+
+# -------------------------
+# Yield Report (Excel-like)
+# -------------------------
+@app.route("/yield", methods=["GET"])
+@login_required
+def yield_report():
+    # Filters
+    crop_year   = request.args.get("crop_year", "").strip()   # Field.Crop_Year
+    grower      = request.args.get("grower", "").strip()
+    department  = request.args.get("department", "").strip()
+    field       = request.args.get("field", "").strip()
+    crop        = request.args.get("crop", "").strip()
+
+    query = """
+        SELECT
+            fi.Crop_Year AS Crop_Year,
+            g.Grower_Name,
+            d.Dpt_Name AS Department_Name,
+            fi.Field_Name,
+            c.Crop_Name,
+            fi.Acres,
+
+            SUM(h.Bushels) AS Total_Bushels,
+            ROUND(SUM(h.Bushels) / NULLIF(fi.Acres, 0), 2) AS Yield_bu_per_acre,
+
+            ROUND(AVG(h.MC), 2) AS Avg_MC,
+
+            SUM(h.WetBushels) AS Total_WetBushels,
+            SUM(h.DryBushels) AS Total_DryBushels,
+            ROUND(SUM(h.DryBushels) / NULLIF(fi.Acres, 0), 2) AS Dry_Yield_bu_per_acre
+
+        FROM Harvest h
+        JOIN Field fi       ON h.Field_ID = fi.Field_ID
+        JOIN Department d   ON fi.Dpt_ID = d.Dpt_ID
+        JOIN Grower g       ON d.Grower_ID = g.Grower_ID
+        JOIN Crop c         ON h.Crop_ID = c.Crop_ID
+
+        WHERE 1=1
+    """
+
+    params = []
+
+    # Apply filters
+    if crop_year:
+        query += " AND fi.Crop_Year = %s"
+        params.append(crop_year)
+
+    if grower:
+        query += " AND g.Grower_Name LIKE %s"
+        params.append(f"%{grower}%")
+
+    if department:
+        query += " AND d.Dpt_Name LIKE %s"
+        params.append(f"%{department}%")
+
+    if field:
+        query += " AND fi.Field_Name LIKE %s"
+        params.append(f"%{field}%")
+
+    if crop:
+        query += " AND c.Crop_Name LIKE %s"
+        params.append(f"%{crop}%")
+
+    query += """
+        GROUP BY
+            fi.Crop_Year, g.Grower_Name, d.Dpt_Name, fi.Field_Name, c.Crop_Name, fi.Acres
+        ORDER BY
+            fi.Crop_Year DESC, g.Grower_Name, d.Dpt_Name, fi.Field_Name
+    """
+
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    cur.execute(query, params)
+    results = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    active_filters = {
+        "crop_year": crop_year,
+        "grower": grower,
+        "department": department,
+        "field": field,
+        "crop": crop
+    }
+
+    return render_template("yield.html", results=results, active_filters=active_filters)
+
+
+# -------------------------
+# Export Yield Report Excel
+# -------------------------
+@app.route("/yield/export", methods=["GET"])
+@login_required
+def yield_export():
+    crop_year   = request.args.get("crop_year", "").strip()
+    grower      = request.args.get("grower", "").strip()
+    department  = request.args.get("department", "").strip()
+    field       = request.args.get("field", "").strip()
+    crop        = request.args.get("crop", "").strip()
+
+    query = """
+        SELECT
+            fi.Crop_Year AS Crop_Year,
+            g.Grower_Name,
+            d.Dpt_Name AS Department_Name,
+            fi.Field_Name,
+            c.Crop_Name,
+            fi.Acres,
+
+            SUM(h.Bushels) AS Total_Bushels,
+            ROUND(SUM(h.Bushels) / NULLIF(fi.Acres, 0), 2) AS Yield_bu_per_acre,
+
+            ROUND(AVG(h.MC), 2) AS Avg_MC,
+
+            SUM(h.WetBushels) AS Total_WetBushels,
+            SUM(h.DryBushels) AS Total_DryBushels,
+            ROUND(SUM(h.DryBushels) / NULLIF(fi.Acres, 0), 2) AS Dry_Yield_bu_per_acre
+
+        FROM Harvest h
+        JOIN Field fi       ON h.Field_ID = fi.Field_ID
+        JOIN Department d   ON fi.Dpt_ID = d.Dpt_ID
+        JOIN Grower g       ON d.Grower_ID = g.Grower_ID
+        JOIN Crop c         ON h.Crop_ID = c.Crop_ID
+
+        WHERE 1=1
+    """
+
+    params = []
+
+    if crop_year:
+        query += " AND fi.Crop_Year = %s"
+        params.append(crop_year)
+    if grower:
+        query += " AND g.Grower_Name LIKE %s"
+        params.append(f"%{grower}%")
+    if department:
+        query += " AND d.Dpt_Name LIKE %s"
+        params.append(f"%{department}%")
+    if field:
+        query += " AND fi.Field_Name LIKE %s"
+        params.append(f"%{field}%")
+    if crop:
+        query += " AND c.Crop_Name LIKE %s"
+        params.append(f"%{crop}%")
+
+    query += """
+        GROUP BY
+            fi.Crop_Year, g.Grower_Name, d.Dpt_Name, fi.Field_Name, c.Crop_Name, fi.Acres
+        ORDER BY
+            fi.Crop_Year DESC, g.Grower_Name, d.Dpt_Name, fi.Field_Name
+    """
+
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    cur.execute(query, params)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    df = pd.DataFrame(rows)
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Yields")
+        ws = writer.sheets["Yields"]
+        ws.freeze_panes = "A2"
+
+    output.seek(0)
+    return send_file(output, as_attachment=True, download_name="Yield_Report.xlsx")
+
+
+@app.route("/inventory", methods=["GET"])
+@login_required
+def inventory_report():
+    # Filters (optional)
+    crop_year = request.args.get("crop_year", "").strip()   # from Field.Crop_Year
+    crop_name = request.args.get("crop", "").strip()        # Crop.Crop_Name (contains search)
+
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+
+    # 1) Harvest totals by Bin + Crop
+    harvest_q = """
+        SELECT
+            s.StorLoc_ID,
+            s.Bin_Name,
+            c.Crop_Name,
+            SUM(COALESCE(h.DryBushels, h.Bushels, 0)) AS Harvest_Bu,
+            -- weighted avg MC by harvested bushels
+            CASE
+              WHEN SUM(COALESCE(h.DryBushels, h.Bushels, 0)) = 0 THEN NULL
+              ELSE SUM(COALESCE(h.DryBushels, h.Bushels, 0) * COALESCE(h.MC, 0))
+                   / SUM(COALESCE(h.DryBushels, h.Bushels, 0))
+            END AS Avg_MC
+        FROM Storage_Location s
+        LEFT JOIN Harvest h ON h.StorLoc_ID = s.StorLoc_ID
+        LEFT JOIN Crop c ON c.Crop_ID = h.Crop_ID
+        LEFT JOIN Field fi ON fi.Field_ID = h.Field_ID
+        WHERE 1=1
+    """
+    params = []
+
+    if crop_year:
+        harvest_q += " AND fi.Crop_Year = %s"
+        params.append(crop_year)
+
+    if crop_name:
+        harvest_q += " AND c.Crop_Name LIKE %s"
+        params.append(f"%{crop_name}%")
+
+    harvest_q += """
+        GROUP BY s.StorLoc_ID, s.Bin_Name, c.Crop_Name
+        ORDER BY s.Bin_Name, c.Crop_Name
+    """
+
+    cur.execute(harvest_q, params)
+    harvest_rows = cur.fetchall()
+
+    # 2) Delivered totals by Bin (out of bin)
+    delivery_q = """
+        SELECT
+            s.StorLoc_ID,
+            SUM(COALESCE(d.Bushels, 0)) AS Delivered_Bu
+        FROM Storage_Location s
+        LEFT JOIN Delivery d ON d.StorLoc_ID = s.StorLoc_ID
+        WHERE 1=1
+        GROUP BY s.StorLoc_ID
+    """
+    cur.execute(delivery_q)
+    delivery_rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    delivered_map = {r["StorLoc_ID"]: (r["Delivered_Bu"] or 0) for r in delivery_rows}
+
+    # Build per-bin output like Excel (one line per bin)
+    # If a bin has multiple crops, choose the crop with max harvest; if 0 harvest => "-"
+    bins = {}
+    for r in harvest_rows:
+        bin_id = r["StorLoc_ID"]
+        if bin_id not in bins:
+            bins[bin_id] = {
+                "bin_id": bin_id,
+                "bin_name": r["Bin_Name"],
+                "crop_name": "-",
+                "harvest_bu": 0.0,
+                "avg_mc": None,
+                "delivered_bu": delivered_map.get(bin_id, 0.0),
+            }
+
+        crop = r["Crop_Name"]
+        harvest_bu = float(r["Harvest_Bu"] or 0)
+        avg_mc = r["Avg_MC"]
+
+        # choose "main crop" by largest harvested bushels
+        if harvest_bu > bins[bin_id]["harvest_bu"]:
+            bins[bin_id]["crop_name"] = crop if crop else "-"
+            bins[bin_id]["harvest_bu"] = harvest_bu
+            bins[bin_id]["avg_mc"] = float(avg_mc) if avg_mc is not None else None
+
+    # Include bins that had no harvest rows at all
+    # (Harvest query returns all bins via LEFT JOIN but Crop_Name might be NULL; still OK)
+    inventory_rows = []
+    for bin_id, b in bins.items():
+        current = (b["harvest_bu"] or 0) - (b["delivered_bu"] or 0)
+        inventory_rows.append({
+            "Bin_Name": b["bin_name"],
+            "Note": None,  # you can map a note if you later add a column
+            "Crop_Name": b["crop_name"] if b["crop_name"] else "-",
+            "Harvest_Bu": round(b["harvest_bu"] or 0, 2),
+            "Avg_MC": None if b["avg_mc"] is None else round(b["avg_mc"], 2),
+            "Delivered_Bu": round(b["delivered_bu"] or 0, 2),
+            "Current_Bu": round(current, 2),
+        })
+
+    # Sort bins like Excel
+    inventory_rows.sort(key=lambda x: (x["Bin_Name"] or ""))
+
+    # Summary (right side of Excel): totals by crop
+    summary = {}
+    for r in inventory_rows:
+        crop = r["Crop_Name"] or "-"
+        summary.setdefault(crop, {"Harvest": 0.0, "Delivered": 0.0, "Inventory": 0.0})
+        summary[crop]["Harvest"] += r["Harvest_Bu"]
+        summary[crop]["Delivered"] += r["Delivered_Bu"]
+        summary[crop]["Inventory"] += r["Current_Bu"]
+
+    # Optional: split Corn into Dry/HMC based on MC like many sheets do
+    # (Only if crop contains "Corn")
+    corn_split = {"Dry": {"Harvest": 0.0, "Delivered": 0.0, "Inventory": 0.0},
+                  "HMC": {"Harvest": 0.0, "Delivered": 0.0, "Inventory": 0.0}}
+    for r in inventory_rows:
+        if r["Crop_Name"] and "corn" in r["Crop_Name"].lower():
+            mc = r["Avg_MC"]
+            label = "Dry" if (mc is not None and mc <= 15.5) else "HMC"
+            corn_split[label]["Harvest"] += r["Harvest_Bu"]
+            corn_split[label]["Delivered"] += r["Delivered_Bu"]
+            corn_split[label]["Inventory"] += r["Current_Bu"]
+
+    active_filters = {"crop_year": crop_year, "crop": crop_name}
+
+    return render_template(
+        "inventory.html",
+        rows=inventory_rows,
+        summary=summary,
+        corn_split=corn_split,
+        active_filters=active_filters
+    )
+
+
+@app.route("/inventory/export", methods=["GET"])
+@login_required
+def inventory_export():
+    # same filters
+    crop_year = request.args.get("crop_year", "").strip()
+    crop_name = request.args.get("crop", "").strip()
+
+    # Reuse the page function logic by calling it directly is not ideal;
+    # easiest is to call inventory_report logic again, but here we keep it simple:
+    # (Call the report and rebuild from returned context is messy)
+    # So: just redirect users to copy/paste, OR implement export same query style.
+    # We'll implement export by calling inventory_report() data logic quickly:
+
+    # ---- Quick internal call: duplicate minimal extraction ----
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+
+    harvest_q = """
+        SELECT
+            s.StorLoc_ID,
+            s.Bin_Name,
+            c.Crop_Name,
+            SUM(COALESCE(h.DryBushels, h.Bushels, 0)) AS Harvest_Bu,
+            CASE
+              WHEN SUM(COALESCE(h.DryBushels, h.Bushels, 0)) = 0 THEN NULL
+              ELSE SUM(COALESCE(h.DryBushels, h.Bushels, 0) * COALESCE(h.MC, 0))
+                   / SUM(COALESCE(h.DryBushels, h.Bushels, 0))
+            END AS Avg_MC
+        FROM Storage_Location s
+        LEFT JOIN Harvest h ON h.StorLoc_ID = s.StorLoc_ID
+        LEFT JOIN Crop c ON c.Crop_ID = h.Crop_ID
+        LEFT JOIN Field fi ON fi.Field_ID = h.Field_ID
+        WHERE 1=1
+    """
+    params = []
+    if crop_year:
+        harvest_q += " AND fi.Crop_Year = %s"
+        params.append(crop_year)
+    if crop_name:
+        harvest_q += " AND c.Crop_Name LIKE %s"
+        params.append(f"%{crop_name}%")
+    harvest_q += " GROUP BY s.StorLoc_ID, s.Bin_Name, c.Crop_Name"
+
+    cur.execute(harvest_q, params)
+    harvest_rows = cur.fetchall()
+
+    delivery_q = """
+        SELECT s.StorLoc_ID, SUM(COALESCE(d.Bushels,0)) AS Delivered_Bu
+        FROM Storage_Location s
+        LEFT JOIN Delivery d ON d.StorLoc_ID = s.StorLoc_ID
+        GROUP BY s.StorLoc_ID
+    """
+    cur.execute(delivery_q)
+    delivery_rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    delivered_map = {r["StorLoc_ID"]: (r["Delivered_Bu"] or 0) for r in delivery_rows}
+
+    bins = {}
+    for r in harvest_rows:
+        bid = r["StorLoc_ID"]
+        bins.setdefault(bid, {
+            "BIN LOCATION": r["Bin_Name"],
+            "Note": "",
+            "CROP": "-",
+            "HARVEST": 0.0,
+            "MC": None,
+            "DELIVERED": delivered_map.get(bid, 0.0),
+        })
+        hb = float(r["Harvest_Bu"] or 0)
+        if hb > bins[bid]["HARVEST"]:
+            bins[bid]["CROP"] = r["Crop_Name"] or "-"
+            bins[bid]["HARVEST"] = hb
+            bins[bid]["MC"] = None if r["Avg_MC"] is None else float(r["Avg_MC"])
+
+    out = []
+    for bid, b in bins.items():
+        current = (b["HARVEST"] or 0) - (b["DELIVERED"] or 0)
+        out.append({
+            "BIN LOCATION": b["BIN LOCATION"],
+            "Note": b["Note"],
+            "CROP": b["CROP"],
+            "HARVEST": round(b["HARVEST"], 2),
+            "MC": None if b["MC"] is None else round(b["MC"], 2),
+            "DELIVERED": round(b["DELIVERED"], 2),
+            "CURRENT": round(current, 2),
+        })
+
+    df = pd.DataFrame(out).sort_values("BIN LOCATION")
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Inventory")
+        writer.sheets["Inventory"].freeze_panes = "A2"
+    output.seek(0)
+
+    return send_file(output, as_attachment=True, download_name="Inventory_Report.xlsx")
+
+
 
 
 
