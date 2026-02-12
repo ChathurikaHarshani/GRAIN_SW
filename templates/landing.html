@@ -5,40 +5,229 @@
   <title>GMS</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
   <style>
-    .hero {
-      min-height: 100vh;
-      background: url("{{ url_for('static', filename='images/landing.png') }}") center/cover no-repeat;
-      position: relative;
+    :root{
+      --glass: rgba(255,255,255,0.22);
+      --glass-strong: rgba(255,255,255,0.35);
+      --border: rgba(255,255,255,0.45);
+      --shadow: 0 40px 90px rgba(0,0,0,0.18);
+      --green: #2f7d32;
     }
-    .overlay {
-      position:absolute; inset:0;
-      background: rgba(0,0,0,0.35);
-    }
-    .content {
-      position:relative;
+
+    /* ===== FULL BACKGROUND (like your mockup) ===== */
+    body{
+      margin:0;
       min-height:100vh;
       display:flex;
       align-items:center;
       justify-content:center;
-      text-align:center;
-      padding: 24px;
+      font-family: system-ui, -apple-system, sans-serif;
+
+      /* Put a nice sky/field image here (recommended) */
+      background: url("{{ url_for('static', filename='images/landing.jpeg') }}") center/cover no-repeat fixed;
+      position: relative;
+      padding: 28px;
+    }
+
+    /* If you don’t have landing_bg.jpg, comment line above and use this gradient fallback
+    body{ background: linear-gradient(135deg, #b7d0ff, #dbf6cc); }
+    */
+
+    /* ===== BLUR OVERLAY LAYER (creates the frosted look) ===== */
+    body::before{
+      content:"";
+      position: fixed;
+      inset:0;
+      background: rgba(255,255,255,0.06);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      z-index:-2;
+    }
+
+    /* ===== SOFT COLOR WASH like the green/yellow tint ===== */
+    body::after{
+      content:"";
+      position: fixed;
+      inset:0;
+      background:
+        radial-gradient(circle at 25% 20%, rgba(120,170,255,0.22), transparent 40%),
+        radial-gradient(circle at 80% 70%, rgba(170,255,150,0.20), transparent 45%),
+        radial-gradient(circle at 70% 30%, rgba(255,240,160,0.18), transparent 50%);
+      z-index:-1;
+      pointer-events:none;
+    }
+
+    /* ===== OUTER GLASS SHELL ===== */
+    .landing-shell{
+      width: min(1120px, 94%);
+      border-radius: 34px;
+      overflow: hidden;
+      background: var(--glass);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(22px);
+      -webkit-backdrop-filter: blur(22px);
+      position: relative;
+    }
+
+    /* subtle inner highlight border */
+    .landing-shell::before{
+      content:"";
+      position:absolute;
+      inset: 10px;
+      border-radius: 28px;
+      border: 1px solid rgba(255,255,255,0.25);
+      pointer-events:none;
+    }
+
+    /* ===== INNER GLASS CARD (the big rounded rectangle inside) ===== */
+    .inner-card{
+      margin: 26px;
+      border-radius: 28px;
+      overflow:hidden;
+      background: rgba(255,255,255,0.22);
+      border: 1px solid rgba(255,255,255,0.35);
+      backdrop-filter: blur(22px);
+      -webkit-backdrop-filter: blur(22px);
+      box-shadow: 0 20px 45px rgba(0,0,0,0.10);
+    }
+
+    /* ===== LEFT PHOTO BLOCK ===== */
+    .left-photo{
+      min-height: 520px;
+      background: url("{{ url_for('static', filename='images/landing.jpeg') }}") center/cover no-repeat;
+    }
+
+    /* ===== RIGHT PANEL ===== */
+    .panel{
+      min-height: 520px;
+      padding: 64px 60px;
+      background: rgba(255,255,255,0.10);
+      border-left: 1px solid rgba(255,255,255,0.25);
+    }
+
+    h1{
+      font-weight: 800;
+      letter-spacing: -0.6px;
+      font-size: 2.7rem;
+      line-height: 1.15;
+      color: rgba(0,0,0,0.78);
+      margin-bottom: 10px;
+    }
+
+    .tagline{
+      color: rgba(0,0,0,0.55);
+      font-size: 1.05rem;
+      margin-bottom: 26px;
+    }
+
+    /* Buttons */
+    .btn-primary{
+      background: var(--green);
+      border: none;
+      padding: 12px 34px;
+      font-weight: 600;
+      border-radius: 12px;
+      box-shadow: 0 10px 20px rgba(47,125,50,0.22);
+    }
+    .btn-primary:hover{ background:#256628; }
+
+    .btn-outline-dark{
+      border-radius: 12px;
+      padding: 12px 30px;
+      border-color: rgba(0,0,0,0.25);
+      color: rgba(0,0,0,0.72);
+      background: rgba(255,255,255,0.20);
+    }
+    .btn-outline-dark:hover{
+      background: rgba(255,255,255,0.28);
+      border-color: rgba(0,0,0,0.30);
+      color: rgba(0,0,0,0.85);
+    }
+
+    hr{
+      opacity: 0.16;
+      margin: 26px 0;
+    }
+
+    .feature-list{
+      margin:0;
+      padding:0;
+      list-style:none;
+    }
+
+    .feature-list li{
+      display:flex;
+      align-items:center;
+      gap: 12px;
+      margin-bottom: 14px;
+      font-size: 1.02rem;
+      color: rgba(0,0,0,0.68);
+    }
+
+    .check{
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: rgba(47,125,50,0.18);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      border: 1px solid rgba(47,125,50,0.25);
+      font-weight: 800;
+      color: rgba(47,125,50,0.95);
+      flex: 0 0 26px;
+    }
+
+    @media (max-width: 992px){
+      body{ padding: 16px; }
+      .inner-card{ margin: 16px; }
+      .left-photo{ min-height: 260px; }
+      .panel{ min-height: auto; padding: 34px 26px; }
+      h1{ font-size: 2.1rem; }
     }
   </style>
 </head>
 
 <body>
-  <div class="hero">
-    <div class="overlay"></div>
-    <div class="content">
-      <div class="text-white">
-        <h1 class="display-3 fw-bold mb-3">Grain Management System</h1>
-        <p class="lead mb-4">Harvest • Delivery • Billing • Reports</p>
-        <a href="{{ url_for('login') }}" class="btn btn-lg btn-primary">Login</a>
-        <p > </p>
-        <a href="{{ url_for('signup') }}"class="btn btn-lg btn-primary">Create new account</a>
+
+  <div class="landing-shell">
+    <div class="inner-card">
+      <div class="row g-0">
+
+        <!-- LEFT IMAGE -->
+        <div class="col-lg-5">
+          <div class="left-photo"></div>
+        </div>
+
+        <!-- RIGHT CONTENT -->
+        <div class="col-lg-7">
+          <div class="panel">
+            <h1>Grain Management System</h1>
+            <p class="tagline">
+              Manage harvest, deliveries, billing, and reports efficiently.
+            </p>
+
+            <div class="d-flex flex-wrap gap-3">
+              <a href="{{ url_for('login') }}" class="btn btn-primary btn-lg">Login</a>
+              <a href="{{ url_for('signup') }}" class="btn btn-outline-dark btn-lg">Create New Account</a>
+            </div>
+
+            <hr>
+
+            <ul class="feature-list">
+              <li><span class="check">✓</span> Track harvest progress</li>
+              <li><span class="check">✓</span> Enter and manage deliveries</li>
+              <li><span class="check">✓</span> Generate billing and yield reports</li>
+            </ul>
+
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
+
 </body>
 </html>
