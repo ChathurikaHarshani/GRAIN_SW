@@ -70,74 +70,74 @@
 </div>
 
 <!-- Chart -->
-  <div class="bg-white border rounded p-3 mb-4">
-    <div class="d-flex justify-content-between align-items-center mb-2">
-      <h5 class="mb-0">Daily Bushels by Crop</h5>
-      <small class="text-muted">Hover to see values</small>
-    </div>
-    <canvas id="paceChart" height="120"></canvas>
+<div class="bg-white border rounded p-3 mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h5 class="mb-0">Daily Bushels by Crop</h5>
+    <small class="text-muted">Hover to see values</small>
   </div>
 
+  <div style="position: relative; height: 420px; width: 100%;">
+    <canvas id="paceChart"></canvas>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <!-- Chart JS code (must be BEFORE </body>) -->
-<script>
-  const labels = [
-    {% for r in rows %}
-      "{{ r.Date }}",
-    {% endfor %}
-  ];
+<script id="pace-data" type="application/json">
+{
+  "labels": {{ rows | map(attribute='DateStr') | list | tojson }},
+  "corn": {{ rows | map(attribute='Corn') | list | tojson }},
+  "soybean": {{ rows | map(attribute='Soybean') | list | tojson }},
+  "milo": {{ rows | map(attribute='Milo') | list | tojson }}
+}
+</script>
 
-  const data = {
-    labels: labels,
-    datasets: [
-      {
-        label: "Total Bushels",
-        data: [{% for r in rows %}{{ r.Bushels or 0 }},{% endfor %}],
-        borderWidth: 2,
-        tension: 0.25
-      },
-      {
-        label: "Corn",
-        data: [{% for r in rows %}{{ r.Corn or 0 }},{% endfor %}],
-        borderWidth: 2,
-        tension: 0.25
-      },
-      {
-        label: "Soybean",
-        data: [{% for r in rows %}{{ r.Soybean or 0 }},{% endfor %}],
-        borderWidth: 2,
-        tension: 0.25
-      },
-      {
-        label: "Milo",
-        data: [{% for r in rows %}{{ r.Milo or 0 }},{% endfor %}],
-        borderWidth: 2,
-        tension: 0.25
-      }
-    ]
-  };
+<script>
+  const paceData = JSON.parse(document.getElementById("pace-data").textContent);
 
   const ctx = document.getElementById("paceChart");
+
   new Chart(ctx, {
-    type: "line",
-    data: data,
+    type: "bar",
+    data: {
+      labels: paceData.labels,
+      datasets: [
+        {
+          label: "Corn",
+          data: paceData.corn,
+          backgroundColor: "yellow",
+          barPercentage: 0.5,
+          categoryPercentage: 0.8
+        },
+        {
+          label: "Soybean",
+          data: paceData.soybean,
+          backgroundColor: "limegreen",
+          barPercentage: 0.5,
+          categoryPercentage: 0.8
+        },
+        {
+          label: "Milo",
+          data: paceData.milo,
+          backgroundColor: "red",
+          barPercentage: 0.5,
+          categoryPercentage: 0.8
+        }
+      ]
+    },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      interaction: {
-        mode: "index",
-        intersect: false
-      },
       plugins: {
-        legend: { position: "top" },
+        legend: { position: "right" },
         tooltip: { enabled: true }
       },
       scales: {
-        y: {
-          beginAtZero: true,
-          title: { display: true, text: "Bushels" }
-        },
         x: {
           title: { display: true, text: "Date" }
+        },
+        y: {
+          beginAtZero: true,
+          title: { display: true, text: "Bushels per Day" }
         }
       }
     }

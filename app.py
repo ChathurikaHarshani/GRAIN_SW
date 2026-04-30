@@ -11,6 +11,7 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, login_
 import pymysql
 from io import BytesIO
 import pandas as pd
+#from slingshot_client import main as run_slingshot_import
 
 
 
@@ -204,6 +205,7 @@ def health():
 
 
 @app.route("/app")
+@login_required
 def dashboard():
     return render_template("index.html", app_name="GMS")
 
@@ -222,6 +224,27 @@ def calculate_bushels(gross_val, tare_val, mc_val, wpb, base_mc):
     return round(wet_bu, 2)
 
 
+def calculated_bushels_sql(weight_alias: str, crop_alias: str) -> str:
+    return f"""
+        CASE
+          WHEN {weight_alias}.Gross_Weight IS NULL
+            OR {crop_alias}.Weight_PerBushel IS NULL
+            OR {crop_alias}.Weight_PerBushel = 0
+            THEN {weight_alias}.Bushels
+          WHEN {weight_alias}.MC IS NOT NULL
+            AND {crop_alias}.Base_MC IS NOT NULL
+            AND {weight_alias}.MC > {crop_alias}.Base_MC
+            THEN (
+              ((COALESCE({weight_alias}.Gross_Weight, 0) - COALESCE({weight_alias}.Tare_Weight, 0)) / {crop_alias}.Weight_PerBushel)
+              * ((100 - {weight_alias}.MC) / (100 - {crop_alias}.Base_MC))
+            )
+          ELSE (
+            (COALESCE({weight_alias}.Gross_Weight, 0) - COALESCE({weight_alias}.Tare_Weight, 0)) / {crop_alias}.Weight_PerBushel
+          )
+        END
+    """
+
+
 
 
 
@@ -231,6 +254,7 @@ def calculate_bushels(gross_val, tare_val, mc_val, wpb, base_mc):
 
 # ----------------- Grower: list + create ----------------- #
 @app.route("/growers")
+@admin_required
 def list_growers():
     """Show all growers in a table."""
     conn = get_conn()
@@ -243,6 +267,7 @@ def list_growers():
 
 
 @app.route("/growers/new", methods=["GET", "POST"])
+@admin_required
 def new_grower():
     """Form to add a new grower."""
     if request.method == "POST":
@@ -271,6 +296,7 @@ def new_grower():
 # ----------------- Department: list + create ----------------- #
 
 @app.route("/departments")
+@admin_required
 def list_departments():
     """Show all departments."""
     conn = get_conn()
@@ -289,6 +315,7 @@ def list_departments():
 
 
 @app.route("/departments/new", methods=["GET", "POST"])
+@admin_required
 def new_department():
     """Create a new department with Grower dropdown."""
     conn = get_conn()
@@ -330,6 +357,7 @@ def new_department():
 # ----------------- Field: list + create ----------------- #
 
 @app.route("/fields")
+@admin_required
 def list_fields():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -346,6 +374,7 @@ def list_fields():
     return render_template("fields.html", fields=fields)
 
 @app.route("/fields/new", methods=["GET", "POST"])
+@admin_required
 def new_field():
     conn = get_conn()
 
@@ -392,6 +421,7 @@ def new_field():
 # ----------------- Cart: list + create ----------------- #
 
 @app.route("/carts")
+@admin_required
 def list_carts():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -402,6 +432,7 @@ def list_carts():
     return render_template("carts.html", carts=carts)
 
 @app.route("/carts/new", methods=["GET", "POST"])
+@admin_required
 def new_cart():
     if request.method == "POST":
         cart_code = request.form.get("cart_code", "").strip()
@@ -428,6 +459,7 @@ def new_cart():
 # ----------------- Crop: list + create ----------------- #
 
 @app.route("/crops")
+@admin_required
 def list_crops():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -442,6 +474,7 @@ def list_crops():
     return render_template("crops.html", crops=crops)
 
 @app.route("/crops/new", methods=["GET", "POST"])
+@admin_required
 def new_crop():
     if request.method == "POST":
         crop_code = request.form.get("crop_code", "").strip()
@@ -469,6 +502,7 @@ def new_crop():
 # ----------------- Storage Location: list + create ----------------- #
 
 @app.route("/storage")
+@admin_required
 def list_storage():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -484,6 +518,7 @@ def list_storage():
     return render_template("storage.html", storage=rows)
 
 @app.route("/storage/new", methods=["GET", "POST"])
+@admin_required
 def new_storage():
     if request.method == "POST":
         bin_code = request.form.get("bin_code", "").strip()
@@ -531,6 +566,7 @@ def new_storage():
 # ----------------- Delivery Location: list + create ----------------- #
 
 @app.route("/delivery-locations")
+@admin_required
 def list_delivery_locations():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -545,6 +581,7 @@ def list_delivery_locations():
     return render_template("delivery_locations.html", locations=rows)
 
 @app.route("/delivery-locations/new", methods=["GET", "POST"])
+@admin_required
 def new_delivery_location():
     if request.method == "POST":
         code = request.form.get("delloc_code", "").strip()
@@ -571,6 +608,7 @@ def new_delivery_location():
 # ----------------- Market Price Monthly: list + create ----------------- #
 
 @app.route("/market-prices")
+@admin_required
 def list_market_prices():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -586,6 +624,7 @@ def list_market_prices():
     return render_template("market_prices.html", prices=rows)
 
 @app.route("/market-prices/new", methods=["GET", "POST"])
+@admin_required
 def new_market_price():
     conn = get_conn()
 
@@ -625,17 +664,236 @@ def new_market_price():
 
 # ----------------- Harvest Query: filter + add ----------------- #
 
+# @app.route("/harvest-query", methods=["GET", "POST"])
+# def harvest_query():
+#     conn = get_conn()
+#     cur = conn.cursor(dictionary=True)
+
+#     # Dropdown data
+#     cur.execute("SELECT Field_ID, Field_Name FROM Field ORDER BY Field_Name;")
+#     fields = cur.fetchall()
+
+#     cur.execute("SELECT StorLoc_ID, Bin_Name FROM Storage_Location ORDER BY Bin_Name;")
+#     storages = cur.fetchall()
+
+#     cur.execute("SELECT Crop_ID, Crop_Name, Weight_PerBushel FROM Crop ORDER BY Crop_Name;")
+#     crops = cur.fetchall()
+
+#     cur.execute("SELECT Cart_ID, Cart_Name FROM Cart ORDER BY Cart_Name;")
+#     carts = cur.fetchall()
+
+#     # Filters (from URL query params)
+#     selected_field = request.args.get("field_id", "")
+#     selected_storage = request.args.get("storloc_id", "")
+
+#     error = None
+
+#     # ----------- POST: insert a new Harvest row -----------
+#     if request.method == "POST":
+#         load_num = request.form.get("load_num", "").strip()
+#         harvest_date = request.form.get("harvest_date", "").strip()
+#         field_id = request.form.get("field_id", "").strip()
+#         storloc_id = request.form.get("storloc_id", "").strip()
+#         crop_id = request.form.get("crop_id", "").strip()
+#         cart_id = request.form.get("cart_id", "").strip()
+#         bushels_val = request.form.get("Bushels", "").strip()
+#         mc = request.form.get("mc", "").strip()
+#         gross = request.form.get("gross", "").strip()
+#         tare = request.form.get("tare", "").strip()
+#         note = request.form.get("note", "").strip()
+
+#         if not (load_num and harvest_date and field_id and storloc_id and crop_id and cart_id):
+#             error = "Load, Date, Field, Storage, Crop, and Cart are required."
+#         else:
+#             # Get Dpt_ID from selected field (auto)
+#             cur.execute("SELECT Dpt_ID FROM Field WHERE Field_ID=%s;", (field_id,))
+#             row = cur.fetchone()
+#             if not row:
+#                 error = "Selected Field not found."
+#             else:
+#                 dpt_id = row["Dpt_ID"]
+
+#                 # # Weight per bushel for bushel calculation
+#                 # cur.execute("SELECT Weight_PerBushel FROM Crop WHERE Crop_ID=%s;", (crop_id,))
+#                 # crop_row = cur.fetchone()
+#                 # wpb = float(crop_row["Weight_PerBushel"]) if crop_row and crop_row["Weight_PerBushel"] else None
+
+
+
+#                 # Weight per bushel + Base moisture for Excel-like bushels calculation
+#                 cur.execute("SELECT Weight_PerBushel, Base_MC FROM Crop WHERE Crop_ID=%s;", (crop_id,))
+#                 crop_row = cur.fetchone()
+#                 wpb = float(crop_row["Weight_PerBushel"]) if crop_row and crop_row["Weight_PerBushel"] is not None else None
+#                 base_mc = float(crop_row["Base_MC"]) if crop_row and crop_row["Base_MC"] is not None else None
+
+
+
+#                 gross_val = float(gross) if gross else None
+#                 tare_val = float(tare) if tare else 0.0
+#                 mc_val = float(mc) if mc else None
+
+#                 # bushels_val = None
+#                 # if wpb and gross_val is not None:
+#                 #     bushels_val = (gross_val - tare_val) / wpb
+
+
+
+
+#                 cur2 = conn.cursor()
+#                 cur2.execute("""
+#                     INSERT INTO Harvest
+#                       (Cart_ID, Field_ID, Crop_ID, Dpt_ID, StorLoc_ID,
+#                        Load_Num, Harvest_Date, MC, Gross_Weight, Tare_Weight, Bushels, Note)
+#                     VALUES
+#                       (%s, %s, %s, %s, %s,
+#                        %s, %s, %s, %s, %s, %s, %s);
+#                 """, (
+#                     int(cart_id), int(field_id), int(crop_id), int(dpt_id), int(storloc_id),
+#                     load_num, harvest_date, mc_val, gross_val, tare_val, bushels_val, (note if note else None)
+#                 ))
+#                 conn.commit()
+#                 cur2.close()
+
+#                 # After insert, keep filters on screen
+#                 conn.close()
+#                 return redirect(url_for("harvest_query", field_id=field_id, storloc_id=storloc_id))
+
+#     # ----------- GET: show table (filtered) -----------
+#     where = []
+#     params = []
+
+#     if selected_field:
+#         where.append("h.Field_ID = %s")
+#         params.append(selected_field)
+#     if selected_storage:
+#         where.append("h.StorLoc_ID = %s")
+#         params.append(selected_storage)
+
+#     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+#     cur.execute(f"""
+#         SELECT
+#           h.Harvest_ID,
+#           h.Load_Num,
+#           h.Harvest_Date,
+#           f.Field_Name,
+#           cr.Crop_Name,
+#           h.MC,
+#           h.Gross_Weight,
+#           h.Tare_Weight,
+#           s.Bin_Name AS Storage,
+#           h.Bushels,
+#           h.Note
+#         FROM Harvest h
+#         JOIN Field f ON h.Field_ID = f.Field_ID
+#         JOIN Crop cr ON h.Crop_ID = cr.Crop_ID
+#         JOIN Storage_Location s ON h.StorLoc_ID = s.StorLoc_ID
+#         {where_sql}
+#         ORDER BY h.Harvest_Date DESC, h.Load_Num DESC;
+#     """, tuple(params))
+
+#     loads = cur.fetchall()
+#     # ---------- Summary calculations (like Excel SUBTOTAL) ----------
+#     mc_values = [float(r["MC"]) for r in loads if r["MC"] is not None]
+#     mc_avg = (sum(mc_values) / len(mc_values)) if mc_values else None
+
+#     gross_sum = sum(float(r["Gross_Weight"]) for r in loads if r["Gross_Weight"] is not None)
+#     tare_sum = sum(float(r["Tare_Weight"]) for r in loads if r["Tare_Weight"] is not None)
+#     lbs_wet = gross_sum - tare_sum
+
+#     bushels_sum = sum(float(r["Bushels"]) for r in loads if r["Bushels"] is not None)
+
+#     # Determine wet bu conversion factor:
+#     # if selected crop is Beans ("B") -> 60 else 56
+#     # We'll infer from the first row crop name, or default to 56
+#     factor = 56
+#     if loads:
+#         crop_name = (loads[0].get("Crop_Name") or "").lower()
+#         if "bean" in crop_name or crop_name in ["b", "beans", "soybean", "soybeans"]:
+#             factor = 60
+
+#     bu_wet = (lbs_wet / factor) if factor and lbs_wet is not None else None
+    
+#     cur.close()
+#     conn.close()
+
+#     return render_template(
+#         "harvest_query.html",
+#         fields=fields,
+#         storages=storages,
+#         crops=crops,
+#         carts=carts,
+#         loads=loads,
+#         selected_field=selected_field,
+#         selected_storage=selected_storage,
+#         error=error,
+#         mc_avg=mc_avg,
+#         lbs_wet=lbs_wet,
+#         bu_wet=bu_wet,
+#         dry_bushels=bushels_sum
+#     )
+
+
 @app.route("/harvest-query", methods=["GET", "POST"])
+@login_required
 def harvest_query():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
 
-    # Dropdown data
-    cur.execute("SELECT Field_ID, Field_Name FROM Field ORDER BY Field_Name;")
+    # ---------------- Filters ----------------
+    selected_field_id = request.args.get("field_id", "").strip()
+    selected_field = request.args.get("field_name", "").strip()
+    selected_storage = request.args.get("storloc_id", "").strip()
+    selected_year = request.args.get("crop_year", "").strip()
+    selected_edit_id = request.args.get("edit_id", "").strip()
+
+    # ---------------- Dropdown data ----------------
+    field_filter_where = []
+    field_filter_params = []
+
+    if selected_year:
+        field_filter_where.append("f.Crop_Year = %s")
+        field_filter_params.append(selected_year)
+
+    field_filter_sql = ("WHERE " + " AND ".join(field_filter_where)) if field_filter_where else ""
+
+    cur.execute("""
+        SELECT DISTINCT
+            f.Field_ID,
+            f.Field_Name,
+            f.Crop_Year
+        FROM Harvest h
+        JOIN Field f ON h.Field_ID = f.Field_ID
+        {field_filter_sql}
+        ORDER BY f.Field_Name, f.Crop_Year DESC, f.Field_ID;
+    """.format(field_filter_sql=field_filter_sql), tuple(field_filter_params))
     fields = cur.fetchall()
+
+    if selected_field_id and selected_year:
+        selected_field_matches_year = any(str(f["Field_ID"]) == selected_field_id for f in fields)
+        if not selected_field_matches_year:
+            selected_field_id = ""
 
     cur.execute("SELECT StorLoc_ID, Bin_Name FROM Storage_Location ORDER BY Bin_Name;")
     storages = cur.fetchall()
+
+
+
+    cur.execute("""
+    SELECT Field_ID, Field_Name, Crop_Year
+    FROM Field
+    ORDER BY Field_Name, Crop_Year DESC;
+    """)
+    entry_fields = cur.fetchall()
+
+    # Distinct years for filter dropdown
+    cur.execute("""
+        SELECT DISTINCT Crop_Year
+        FROM Field
+        WHERE Crop_Year IS NOT NULL
+        ORDER BY Crop_Year DESC;
+    """)
+    years = cur.fetchall()
 
     cur.execute("SELECT Crop_ID, Crop_Name, Weight_PerBushel FROM Crop ORDER BY Crop_Name;")
     crops = cur.fetchall()
@@ -643,30 +901,50 @@ def harvest_query():
     cur.execute("SELECT Cart_ID, Cart_Name FROM Cart ORDER BY Cart_Name;")
     carts = cur.fetchall()
 
-    # Filters (from URL query params)
-    selected_field = request.args.get("field_id", "")
-    selected_storage = request.args.get("storloc_id", "")
-
     error = None
+    edit_load = None
 
-    # ----------- POST: insert a new Harvest row -----------
+    if selected_edit_id:
+        cur.execute("""
+            SELECT
+              Harvest_ID,
+              Cart_ID,
+              Field_ID,
+              Crop_ID,
+              StorLoc_ID,
+              Load_Num,
+              Harvest_Date,
+              MC,
+              Gross_Weight,
+              Tare_Weight,
+              Note
+            FROM Harvest
+            WHERE Harvest_ID = %s;
+        """, (selected_edit_id,))
+        edit_load = cur.fetchone()
+        if not edit_load:
+            selected_edit_id = ""
+
+
+    # ---------------- POST: insert a new Harvest row ----------------
     if request.method == "POST":
+        harvest_id = request.form.get("harvest_id", "").strip()
         load_num = request.form.get("load_num", "").strip()
         harvest_date = request.form.get("harvest_date", "").strip()
         field_id = request.form.get("field_id", "").strip()
         storloc_id = request.form.get("storloc_id", "").strip()
         crop_id = request.form.get("crop_id", "").strip()
         cart_id = request.form.get("cart_id", "").strip()
-        bushels_val = request.form.get("Bushels", "").strip()
         mc = request.form.get("mc", "").strip()
         gross = request.form.get("gross", "").strip()
         tare = request.form.get("tare", "").strip()
         note = request.form.get("note", "").strip()
 
-        if not (load_num and harvest_date and field_id and storloc_id and crop_id and cart_id):
-            error = "Load, Date, Field, Storage, Crop, and Cart are required."
+        if not (load_num and harvest_date and field_id and crop_id and cart_id):
+            error = "Load, Date, Field, Crop, and Cart are required."
+        elif not harvest_id and not storloc_id:
+            error = "Storage is required for new loads."
         else:
-            # Get Dpt_ID from selected field (auto)
             cur.execute("SELECT Dpt_ID FROM Field WHERE Field_ID=%s;", (field_id,))
             row = cur.fetchone()
             if not row:
@@ -674,61 +952,86 @@ def harvest_query():
             else:
                 dpt_id = row["Dpt_ID"]
 
-                # # Weight per bushel for bushel calculation
-                # cur.execute("SELECT Weight_PerBushel FROM Crop WHERE Crop_ID=%s;", (crop_id,))
-                # crop_row = cur.fetchone()
-                # wpb = float(crop_row["Weight_PerBushel"]) if crop_row and crop_row["Weight_PerBushel"] else None
-
-
-
-                # Weight per bushel + Base moisture for Excel-like bushels calculation
                 cur.execute("SELECT Weight_PerBushel, Base_MC FROM Crop WHERE Crop_ID=%s;", (crop_id,))
                 crop_row = cur.fetchone()
                 wpb = float(crop_row["Weight_PerBushel"]) if crop_row and crop_row["Weight_PerBushel"] is not None else None
                 base_mc = float(crop_row["Base_MC"]) if crop_row and crop_row["Base_MC"] is not None else None
 
-
-
                 gross_val = float(gross) if gross else None
                 tare_val = float(tare) if tare else 0.0
                 mc_val = float(mc) if mc else None
-
-                # bushels_val = None
-                # if wpb and gross_val is not None:
-                #     bushels_val = (gross_val - tare_val) / wpb
-
-
-
+                storloc_val = int(storloc_id) if storloc_id else None
+                bushels_val = calculate_bushels(
+                    gross_val,
+                    tare_val,
+                    mc_val,
+                    wpb,
+                    base_mc,
+                )
 
                 cur2 = conn.cursor()
-                cur2.execute("""
-                    INSERT INTO Harvest
-                      (Cart_ID, Field_ID, Crop_ID, Dpt_ID, StorLoc_ID,
-                       Load_Num, Harvest_Date, MC, Gross_Weight, Tare_Weight, Bushels, Note)
-                    VALUES
-                      (%s, %s, %s, %s, %s,
-                       %s, %s, %s, %s, %s, %s, %s);
-                """, (
-                    int(cart_id), int(field_id), int(crop_id), int(dpt_id), int(storloc_id),
-                    load_num, harvest_date, mc_val, gross_val, tare_val, bushels_val, (note if note else None)
-                ))
+                if harvest_id:
+                    cur2.execute("""
+                        UPDATE Harvest
+                        SET Cart_ID = %s,
+                            Field_ID = %s,
+                            Crop_ID = %s,
+                            Dpt_ID = %s,
+                            StorLoc_ID = %s,
+                            Load_Num = %s,
+                            Harvest_Date = %s,
+                            MC = %s,
+                            Gross_Weight = %s,
+                            Tare_Weight = %s,
+                            Bushels = %s,
+                            Note = %s
+                        WHERE Harvest_ID = %s;
+                    """, (
+                        int(cart_id), int(field_id), int(crop_id), int(dpt_id), storloc_val,
+                        load_num, harvest_date, mc_val, gross_val, tare_val, bushels_val,
+                        (note if note else None), int(harvest_id)
+                    ))
+                else:
+                    cur2.execute("""
+                        INSERT INTO Harvest
+                          (Cart_ID, Field_ID, Crop_ID, Dpt_ID, StorLoc_ID,
+                           Load_Num, Harvest_Date, MC, Gross_Weight, Tare_Weight, Bushels, Note)
+                        VALUES
+                          (%s, %s, %s, %s, %s,
+                           %s, %s, %s, %s, %s, %s, %s);
+                    """, (
+                        int(cart_id), int(field_id), int(crop_id), int(dpt_id), storloc_val,
+                        load_num, harvest_date, mc_val, gross_val, tare_val, bushels_val, (note if note else None)
+                    ))
                 conn.commit()
                 cur2.close()
 
-                # After insert, keep filters on screen
-                conn.close()
-                return redirect(url_for("harvest_query", field_id=field_id, storloc_id=storloc_id))
+                return redirect(url_for(
+                    "harvest_query",
+                    field_id=selected_field_id,
+                    field_name=selected_field,
+                    storloc_id=selected_storage,
+                    crop_year=selected_year
+                ))
 
-    # ----------- GET: show table (filtered) -----------
+    # ---------------- GET: show filtered loads ----------------
     where = []
     params = []
 
-    if selected_field:
+    if selected_field_id:
         where.append("h.Field_ID = %s")
+        params.append(selected_field_id)
+    elif selected_field:
+        where.append("f.Field_Name = %s")
         params.append(selected_field)
+
     if selected_storage:
         where.append("h.StorLoc_ID = %s")
         params.append(selected_storage)
+
+    if selected_year:
+        where.append("f.Crop_Year = %s")
+        params.append(selected_year)
 
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
@@ -738,7 +1041,11 @@ def harvest_query():
           h.Load_Num,
           h.Harvest_Date,
           f.Field_Name,
+          f.Crop_Year,
           cr.Crop_Name,
+          cr.Crop_Code,
+          cr.Weight_PerBushel,
+          cr.Base_MC,
           h.MC,
           h.Gross_Weight,
           h.Tare_Weight,
@@ -748,13 +1055,24 @@ def harvest_query():
         FROM Harvest h
         JOIN Field f ON h.Field_ID = f.Field_ID
         JOIN Crop cr ON h.Crop_ID = cr.Crop_ID
-        JOIN Storage_Location s ON h.StorLoc_ID = s.StorLoc_ID
+        LEFT JOIN Storage_Location s ON h.StorLoc_ID = s.StorLoc_ID
         {where_sql}
         ORDER BY h.Harvest_Date DESC, h.Load_Num DESC;
     """, tuple(params))
 
     loads = cur.fetchall()
-    # ---------- Summary calculations (like Excel SUBTOTAL) ----------
+
+    for row in loads:
+        calculated_bushels = calculate_bushels(
+            float(row["Gross_Weight"]) if row["Gross_Weight"] is not None else None,
+            float(row["Tare_Weight"]) if row["Tare_Weight"] is not None else 0.0,
+            float(row["MC"]) if row["MC"] is not None else None,
+            float(row["Weight_PerBushel"]) if row["Weight_PerBushel"] is not None else None,
+            float(row["Base_MC"]) if row["Base_MC"] is not None else None,
+        )
+        row["Calculated_Bushels"] = calculated_bushels if calculated_bushels is not None else row["Bushels"]
+
+    # ---------------- Summary ----------------
     mc_values = [float(r["MC"]) for r in loads if r["MC"] is not None]
     mc_avg = (sum(mc_values) / len(mc_values)) if mc_values else None
 
@@ -762,80 +1080,106 @@ def harvest_query():
     tare_sum = sum(float(r["Tare_Weight"]) for r in loads if r["Tare_Weight"] is not None)
     lbs_wet = gross_sum - tare_sum
 
-    bushels_sum = sum(float(r["Bushels"]) for r in loads if r["Bushels"] is not None)
+    bushels_sum = sum(float(r["Calculated_Bushels"]) for r in loads if r["Calculated_Bushels"] is not None)
 
-    # Determine wet bu conversion factor:
-    # if selected crop is Beans ("B") -> 60 else 56
-    # We'll infer from the first row crop name, or default to 56
     factor = 56
     if loads:
+        crop_code = (loads[0].get("Crop_Code") or "").lower()
         crop_name = (loads[0].get("Crop_Name") or "").lower()
-        if "bean" in crop_name or crop_name in ["b", "beans", "soybean", "soybeans"]:
+        if crop_code == "b" or "bean" in crop_name or crop_name in ["beans", "soybean", "soybeans"]:
             factor = 60
 
     bu_wet = (lbs_wet / factor) if factor and lbs_wet is not None else None
-    
+
     cur.close()
     conn.close()
 
     return render_template(
         "harvest_query.html",
         fields=fields,
+        entry_fields=entry_fields,
         storages=storages,
+        years=years,
         crops=crops,
         carts=carts,
         loads=loads,
         selected_field=selected_field,
+        selected_field_id=selected_field_id,
         selected_storage=selected_storage,
+        selected_year=selected_year,
         error=error,
         mc_avg=mc_avg,
         lbs_wet=lbs_wet,
         bu_wet=bu_wet,
-        dry_bushels=bushels_sum
+        dry_bushels=bushels_sum,
+        edit_load=edit_load
     )
 
 
+
+
 @app.route("/harvest-summary", methods=["GET"])
+@login_required
 def harvest_summary():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
 
-    # reuse the same filters as harvest_query
-    selected_field = request.args.get("field_id", "")
-    selected_storage = request.args.get("storloc_id", "")
+    selected_field_id = request.args.get("field_id", "").strip()
+    selected_field = request.args.get("field_name", "").strip()
+    selected_storage = request.args.get("storloc_id", "").strip()
+    selected_year = request.args.get("crop_year", "").strip()
 
     where = []
     params = []
 
-    if selected_field:
+    if selected_field_id:
         where.append("h.Field_ID = %s")
+        params.append(selected_field_id)
+    elif selected_field:
+        where.append("f.Field_Name = %s")
         params.append(selected_field)
 
     if selected_storage:
         where.append("h.StorLoc_ID = %s")
         params.append(selected_storage)
 
+    if selected_year:
+        where.append("f.Crop_Year = %s")
+        params.append(selected_year)
+
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
-    # Summary by Field (includes Acres)
     cur.execute(f"""
         SELECT
           f.Field_ID,
           f.Field_Name,
           f.Acres,
+          f.Crop_Year,
           SUM(COALESCE(h.Gross_Weight,0) - COALESCE(h.Tare_Weight,0)) AS total_lbs_wet,
-          SUM(COALESCE(h.Bushels,0)) AS total_dry_bushels,
+          SUM(
+            CASE
+              WHEN h.Gross_Weight IS NULL OR c.Weight_PerBushel IS NULL OR c.Weight_PerBushel = 0 THEN 0
+              WHEN h.MC IS NOT NULL AND c.Base_MC IS NOT NULL AND h.MC > c.Base_MC
+                THEN (
+                  ((COALESCE(h.Gross_Weight, 0) - COALESCE(h.Tare_Weight, 0)) / c.Weight_PerBushel)
+                  * ((100 - h.MC) / (100 - c.Base_MC))
+                )
+              ELSE (
+                (COALESCE(h.Gross_Weight, 0) - COALESCE(h.Tare_Weight, 0)) / c.Weight_PerBushel
+              )
+            END
+          ) AS total_dry_bushels,
           AVG(h.MC) AS avg_mc
         FROM Harvest h
         JOIN Field f ON h.Field_ID = f.Field_ID
+        JOIN Crop c ON h.Crop_ID = c.Crop_ID
         {where_sql}
-        GROUP BY f.Field_ID, f.Field_Name, f.Acres
-        ORDER BY f.Field_Name;
+        GROUP BY f.Field_ID, f.Field_Name, f.Acres, f.Crop_Year
+        ORDER BY f.Field_Name, f.Crop_Year;
     """, tuple(params))
 
     rows = cur.fetchall()
 
-    # Add bu/acre in python (safe division)
     for r in rows:
         acres = r.get("Acres")
         dry_bu = r.get("total_dry_bushels") or 0
@@ -844,7 +1188,6 @@ def harvest_summary():
         else:
             r["bu_per_acre"] = None
 
-    # Grand totals (optional but useful)
     totals = {
         "total_lbs_wet": sum(_to_float(r.get("total_lbs_wet")) for r in rows),
         "total_dry_bushels": sum(_to_float(r.get("total_dry_bushels")) for r in rows),
@@ -860,15 +1203,18 @@ def harvest_summary():
         rows=rows,
         totals=totals,
         selected_field=selected_field,
-        selected_storage=selected_storage
+        selected_field_id=selected_field_id,
+        selected_storage=selected_storage,
+        selected_year=selected_year
     )
 
 
-
 @app.route("/pace")
+@login_required
 def pace():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
+    harvest_bu_sql = calculated_bushels_sql("h", "c")
 
     # Optional: earliest harvest date (like "1st Harvest Date" in Excel)
     cur.execute("SELECT MIN(Harvest_Date) AS first_date FROM Harvest;")
@@ -889,20 +1235,39 @@ def pace():
     else:
         end_date = date.fromisoformat(end)
 
-    # Pace logic (matches your Excel formulas):
+    # Pace logic (matches the workbook intent):
     # Bushels = SUM(Bushels) by Date
-    # Corn = SUM(Bushels) where Crop is C or HMC
-    # Soybean = SUM(Bushels) where Crop is B
-    # Milo = SUM(Bushels) where Crop is M
-    #
-    # IMPORTANT: Your Harvest table stores Crop_ID, so we join Crop to read Crop_Code.
+    # Corn = corn/HMC rows
+    # Soybean = soybean rows, regardless of whether Crop_Name is Soybean or Soybeans
+    # Milo = milo/sorghum rows
     cur.execute("""
         SELECT
           h.Harvest_Date AS Date,
-          SUM(h.Bushels) AS Bushels,
-          SUM(CASE WHEN c.Crop_Code IN ('C','HMC') THEN h.Bushels ELSE 0 END) AS Corn,
-          SUM(CASE WHEN c.Crop_Code = 'B' THEN h.Bushels ELSE 0 END) AS Soybean,
-          SUM(CASE WHEN c.Crop_Code = 'M' THEN h.Bushels ELSE 0 END) AS Milo
+          SUM(COALESCE(""" + harvest_bu_sql + """, 0)) AS Bushels,
+          SUM(
+            CASE
+              WHEN UPPER(COALESCE(c.Crop_Code, '')) IN ('C', 'HMC')
+                   OR LOWER(COALESCE(c.Crop_Name, '')) IN ('corn', 'hmc')
+              THEN COALESCE(""" + harvest_bu_sql + """, 0)
+              ELSE 0
+            END
+          ) AS Corn,
+          SUM(
+            CASE
+              WHEN UPPER(COALESCE(c.Crop_Code, '')) IN ('B', 'SB', 'SOY', 'SOYBEAN', 'SOYBEANS')
+                   OR LOWER(COALESCE(c.Crop_Name, '')) IN ('soybean', 'soybeans', 'beans')
+              THEN COALESCE(""" + harvest_bu_sql + """, 0)
+              ELSE 0
+            END
+          ) AS Soybean,
+          SUM(
+            CASE
+              WHEN UPPER(COALESCE(c.Crop_Code, '')) IN ('M', 'MILO')
+                   OR LOWER(COALESCE(c.Crop_Name, '')) IN ('milo', 'grain sorghum', 'sorghum')
+              THEN COALESCE(""" + harvest_bu_sql + """, 0)
+              ELSE 0
+            END
+          ) AS Milo
         FROM Harvest h
         JOIN Crop c ON h.Crop_ID = c.Crop_ID
         WHERE h.Harvest_Date BETWEEN %s AND %s
@@ -930,6 +1295,12 @@ def pace():
         "Milo": sum(fnum(r["Milo"]) for r in rows),
     }
 
+    for r in rows:
+        if r["Date"]:
+            r["DateStr"] = r["Date"].strftime("%m/%d/%Y")   # or "%b %d, %Y"
+        else:
+            r["DateStr"] = ""
+
     return render_template(
         "pace.html",
         first_date=first_date,
@@ -953,10 +1324,381 @@ def _month_name_to_num(name: str) -> int:
     months = {m.lower(): i for i, m in enumerate(calendar.month_name) if m}
     return months.get(name, 0)
 
+
+def build_reconcile_context(start_date, end_date, crop_id=""):
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    harvest_bu_sql = calculated_bushels_sql("h", "c")
+    delivery_bu_sql = calculated_bushels_sql("d", "c")
+
+    cur.execute("SELECT Crop_ID, Crop_Code, Crop_Name FROM Crop ORDER BY Crop_Code;")
+    crops = cur.fetchall()
+
+    crop_filter_sql_h = ""
+    crop_filter_sql_d = ""
+    params_h = [start_date, end_date]
+    params_d = [start_date, end_date]
+
+    if crop_id:
+        crop_filter_sql_h = " AND h.Crop_ID = %s "
+        crop_filter_sql_d = " AND d.Crop_ID = %s "
+        params_h.append(crop_id)
+        params_d.append(crop_id)
+
+    cur.execute(f"""
+        SELECT
+          COUNT(*) AS harvest_rows,
+          AVG(h.MC) AS harvest_avg_mc,
+          SUM(COALESCE(h.Gross_Weight,0) - COALESCE(h.Tare_Weight,0)) AS harvest_lbs_wet,
+          SUM(COALESCE({harvest_bu_sql},0)) AS harvest_bushels
+        FROM Harvest h
+        JOIN Crop c ON h.Crop_ID = c.Crop_ID
+        WHERE h.Harvest_Date BETWEEN %s AND %s
+        {crop_filter_sql_h}
+    """, tuple(params_h))
+    harvest_sum = cur.fetchone() or {}
+
+    cur.execute(f"""
+        SELECT
+          COUNT(*) AS delivery_rows,
+          AVG(d.MC) AS delivery_avg_mc,
+          SUM(COALESCE(d.Gross_Weight,0) - COALESCE(d.Tare_Weight,0)) AS delivery_lbs_wet,
+          SUM(COALESCE({delivery_bu_sql},0)) AS delivery_bushels,
+          SUM(COALESCE(d.Gross_Sale,0)) AS delivery_gross_sale,
+          SUM(COALESCE(d.Sale_Discounts,0)) AS delivery_discounts,
+          SUM(COALESCE(d.Gross_Sale,0) - COALESCE(d.Sale_Discounts,0)) AS delivery_net_sale
+        FROM Delivery d
+        JOIN Crop c ON d.Crop_ID = c.Crop_ID
+        WHERE d.Delivery_Date BETWEEN %s AND %s
+        {crop_filter_sql_d}
+    """, tuple(params_d))
+    delivery_sum = cur.fetchone() or {}
+
+    diff = {
+        "bushels": _f(delivery_sum.get("delivery_bushels")) - _f(harvest_sum.get("harvest_bushels")),
+        "lbs_wet": _f(delivery_sum.get("delivery_lbs_wet")) - _f(harvest_sum.get("harvest_lbs_wet")),
+        "avg_mc": _f(delivery_sum.get("delivery_avg_mc")) - _f(harvest_sum.get("harvest_avg_mc")),
+        "rows": _f(delivery_sum.get("delivery_rows")) - _f(harvest_sum.get("harvest_rows")),
+    }
+
+    cur.execute(f"""
+        SELECT
+          COALESCE(h_crop.Crop_Code, d_crop.Crop_Code, '-') AS crop_code,
+          COALESCE(h_crop.Crop_Name, d_crop.Crop_Name, '-') AS crop_name,
+          COALESCE(hv.harvest_rows, 0) AS harvest_rows,
+          COALESCE(hv.harvest_bushels, 0) AS harvest_bushels,
+          COALESCE(dv.delivery_rows, 0) AS delivery_rows,
+          COALESCE(dv.delivery_bushels, 0) AS delivery_bushels
+        FROM (
+          SELECT
+            h.Crop_ID,
+            COUNT(*) AS harvest_rows,
+            SUM(COALESCE({harvest_bu_sql},0)) AS harvest_bushels
+          FROM Harvest h
+          JOIN Crop c ON h.Crop_ID = c.Crop_ID
+          WHERE h.Harvest_Date BETWEEN %s AND %s
+          {crop_filter_sql_h}
+          GROUP BY h.Crop_ID
+        ) hv
+        LEFT JOIN Crop h_crop ON hv.Crop_ID = h_crop.Crop_ID
+        LEFT JOIN (
+          SELECT
+            d.Crop_ID,
+            COUNT(*) AS delivery_rows,
+            SUM(COALESCE({delivery_bu_sql},0)) AS delivery_bushels
+          FROM Delivery d
+          JOIN Crop c ON d.Crop_ID = c.Crop_ID
+          WHERE d.Delivery_Date BETWEEN %s AND %s
+          {crop_filter_sql_d}
+          GROUP BY d.Crop_ID
+        ) dv ON hv.Crop_ID = dv.Crop_ID
+        LEFT JOIN Crop d_crop ON dv.Crop_ID = d_crop.Crop_ID
+        UNION
+        SELECT
+          COALESCE(h_crop.Crop_Code, d_crop.Crop_Code, '-') AS crop_code,
+          COALESCE(h_crop.Crop_Name, d_crop.Crop_Name, '-') AS crop_name,
+          COALESCE(hv.harvest_rows, 0) AS harvest_rows,
+          COALESCE(hv.harvest_bushels, 0) AS harvest_bushels,
+          COALESCE(dv.delivery_rows, 0) AS delivery_rows,
+          COALESCE(dv.delivery_bushels, 0) AS delivery_bushels
+        FROM (
+          SELECT
+            d.Crop_ID,
+            COUNT(*) AS delivery_rows,
+            SUM(COALESCE({delivery_bu_sql},0)) AS delivery_bushels
+          FROM Delivery d
+          JOIN Crop c ON d.Crop_ID = c.Crop_ID
+          WHERE d.Delivery_Date BETWEEN %s AND %s
+          {crop_filter_sql_d}
+          GROUP BY d.Crop_ID
+        ) dv
+        LEFT JOIN Crop d_crop ON dv.Crop_ID = d_crop.Crop_ID
+        LEFT JOIN (
+          SELECT
+            h.Crop_ID,
+            COUNT(*) AS harvest_rows,
+            SUM(COALESCE({harvest_bu_sql},0)) AS harvest_bushels
+          FROM Harvest h
+          JOIN Crop c ON h.Crop_ID = c.Crop_ID
+          WHERE h.Harvest_Date BETWEEN %s AND %s
+          {crop_filter_sql_h}
+          GROUP BY h.Crop_ID
+        ) hv ON hv.Crop_ID = dv.Crop_ID
+        LEFT JOIN Crop h_crop ON hv.Crop_ID = h_crop.Crop_ID
+        WHERE hv.Crop_ID IS NULL
+        ORDER BY crop_code, crop_name
+    """, tuple(params_h + params_d + params_d + params_h))
+    crop_rows = cur.fetchall()
+
+    for row in crop_rows:
+        row["bushel_diff"] = _f(row.get("delivery_bushels")) - _f(row.get("harvest_bushels"))
+        row["row_diff"] = _f(row.get("delivery_rows")) - _f(row.get("harvest_rows"))
+
+    cur.execute(f"""
+        (
+          SELECT
+            h.Load_Num AS load_key,
+            h.Harvest_Date AS harvest_date,
+            f.Field_Name AS field_name,
+            sl.Bin_Name AS harvest_storage,
+            c.Crop_Code AS crop_code,
+            h.MC AS harvest_mc,
+            h.Gross_Weight AS harvest_gross,
+            h.Tare_Weight AS harvest_tare,
+            {harvest_bu_sql} AS harvest_bushels,
+            d.Delivery_Date AS delivery_date,
+            dl.DelLoc_code AS delivered_to,
+            d.MC AS delivery_mc,
+            d.Gross_Weight AS delivery_gross,
+            d.Tare_Weight AS delivery_tare,
+            {delivery_bu_sql} AS delivery_bushels,
+            d.Price AS price,
+            d.Gross_Sale AS gross_sale,
+            d.Sale_Discounts AS discounts,
+            (COALESCE(d.Gross_Sale,0) - COALESCE(d.Sale_Discounts,0)) AS net_sale
+          FROM Harvest h
+          JOIN Field f ON h.Field_ID = f.Field_ID
+          JOIN Crop c ON h.Crop_ID = c.Crop_ID
+          LEFT JOIN Storage_Location sl ON h.StorLoc_ID = sl.StorLoc_ID
+          LEFT JOIN Delivery d ON CAST(d.Ticket_Num AS CHAR) = h.Load_Num
+          LEFT JOIN Delivery_Location dl ON d.DelLoc_ID = dl.DelLoc_ID
+          WHERE h.Harvest_Date BETWEEN %s AND %s
+          {crop_filter_sql_h}
+        )
+        UNION
+        (
+          SELECT
+            CAST(d.Ticket_Num AS CHAR) AS load_key,
+            NULL AS harvest_date,
+            NULL AS field_name,
+            NULL AS harvest_storage,
+            c.Crop_Code AS crop_code,
+            NULL AS harvest_mc,
+            NULL AS harvest_gross,
+            NULL AS harvest_tare,
+            NULL AS harvest_bushels,
+            d.Delivery_Date AS delivery_date,
+            dl.DelLoc_code AS delivered_to,
+            d.MC AS delivery_mc,
+            d.Gross_Weight AS delivery_gross,
+            d.Tare_Weight AS delivery_tare,
+            {delivery_bu_sql} AS delivery_bushels,
+            d.Price AS price,
+            d.Gross_Sale AS gross_sale,
+            d.Sale_Discounts AS discounts,
+            (COALESCE(d.Gross_Sale,0) - COALESCE(d.Sale_Discounts,0)) AS net_sale
+          FROM Delivery d
+          JOIN Crop c ON d.Crop_ID = c.Crop_ID
+          LEFT JOIN Delivery_Location dl ON d.DelLoc_ID = dl.DelLoc_ID
+          LEFT JOIN Harvest h ON h.Load_Num = CAST(d.Ticket_Num AS CHAR)
+          WHERE d.Delivery_Date BETWEEN %s AND %s
+          {crop_filter_sql_d}
+            AND h.Harvest_ID IS NULL
+        )
+        ORDER BY load_key, harvest_date, delivery_date
+    """, tuple(params_h + params_d))
+    rows = cur.fetchall()
+
+    matched_count = 0
+    harvest_only_count = 0
+    delivery_only_count = 0
+
+    for row in rows:
+        row["bushel_diff"] = _f(row.get("delivery_bushels")) - _f(row.get("harvest_bushels"))
+        row["lbs_diff"] = (
+            (_f(row.get("delivery_gross")) - _f(row.get("delivery_tare")))
+            - (_f(row.get("harvest_gross")) - _f(row.get("harvest_tare")))
+        )
+
+        if row.get("delivery_date") is None:
+            row["status"] = "Harvest Only"
+            harvest_only_count += 1
+        elif row.get("harvest_date") is None:
+            row["status"] = "Delivery Only"
+            delivery_only_count += 1
+        else:
+            row["status"] = "Matched"
+            matched_count += 1
+
+    cur.close()
+    conn.close()
+
+    return {
+        "crops": crops,
+        "selected_crop_id": crop_id,
+        "start_date": start_date,
+        "end_date": end_date,
+        "harvest_sum": harvest_sum,
+        "delivery_sum": delivery_sum,
+        "diff": diff,
+        "crop_rows": crop_rows,
+        "rows": rows,
+        "status_counts": {
+            "matched": matched_count,
+            "harvest_only": harvest_only_count,
+            "delivery_only": delivery_only_count,
+        },
+    }
+
+
+def build_inventory_snapshot(crop_year="", crop_name=""):
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    harvest_bu_sql = calculated_bushels_sql("h", "c")
+    delivery_bu_sql = calculated_bushels_sql("d", "c")
+
+    harvest_q = """
+        SELECT
+            s.StorLoc_ID,
+            s.Bin_Name,
+            c.Crop_Name,
+            SUM(COALESCE(""" + harvest_bu_sql + """, 0)) AS Harvest_Bu,
+            CASE
+              WHEN SUM(COALESCE(""" + harvest_bu_sql + """, 0)) = 0 THEN NULL
+              ELSE SUM(COALESCE(""" + harvest_bu_sql + """, 0) * COALESCE(h.MC, 0))
+                   / SUM(COALESCE(""" + harvest_bu_sql + """, 0))
+            END AS Avg_MC
+        FROM Storage_Location s
+        LEFT JOIN Harvest h ON h.StorLoc_ID = s.StorLoc_ID
+        LEFT JOIN Crop c ON c.Crop_ID = h.Crop_ID
+        LEFT JOIN Field fi ON fi.Field_ID = h.Field_ID
+        WHERE 1=1
+    """
+    params = []
+
+    if crop_year:
+        harvest_q += " AND fi.Crop_Year = %s"
+        params.append(crop_year)
+
+    if crop_name:
+        harvest_q += " AND c.Crop_Name LIKE %s"
+        params.append(f"%{crop_name}%")
+
+    harvest_q += """
+        GROUP BY s.StorLoc_ID, s.Bin_Name, c.Crop_Name
+        ORDER BY s.Bin_Name, c.Crop_Name
+    """
+    cur.execute(harvest_q, params)
+    harvest_rows = cur.fetchall()
+
+    delivery_q = """
+        SELECT
+            s.StorLoc_ID,
+            s.Bin_Name,
+            c.Crop_Name,
+            SUM(COALESCE(""" + delivery_bu_sql + """, 0)) AS Delivered_Bu
+        FROM Storage_Location s
+        LEFT JOIN Delivery d ON d.StorLoc_ID = s.StorLoc_ID
+        LEFT JOIN Crop c ON c.Crop_ID = d.Crop_ID
+        WHERE 1=1
+    """
+    delivery_params = []
+
+    if crop_name:
+        delivery_q += " AND c.Crop_Name LIKE %s"
+        delivery_params.append(f"%{crop_name}%")
+
+    delivery_q += """
+        GROUP BY s.StorLoc_ID, c.Crop_Name
+    """
+    cur.execute(delivery_q, delivery_params)
+    delivery_rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    delivered_map = {}
+    for row in delivery_rows:
+        key = (row["StorLoc_ID"], row["Crop_Name"] or "-")
+        delivered_map[key] = float(row["Delivered_Bu"] or 0)
+
+    inventory_rows = []
+    seen_keys = set()
+
+    for row in harvest_rows:
+        crop_label = row["Crop_Name"] or "-"
+        key = (row["StorLoc_ID"], crop_label)
+        seen_keys.add(key)
+        harvest_bu = float(row["Harvest_Bu"] or 0)
+        delivered_bu = delivered_map.get(key, 0.0)
+        inventory_rows.append({
+            "Bin_Name": row["Bin_Name"],
+            "Note": None,
+            "Crop_Name": crop_label,
+            "Harvest_Bu": round(harvest_bu, 2),
+            "Avg_MC": None if row["Avg_MC"] is None else round(float(row["Avg_MC"]), 2),
+            "Delivered_Bu": round(delivered_bu, 2),
+            "Current_Bu": round(harvest_bu - delivered_bu, 2),
+        })
+
+    for row in delivery_rows:
+        crop_label = row["Crop_Name"] or "-"
+        key = (row["StorLoc_ID"], crop_label)
+        if key in seen_keys:
+            continue
+        delivered_bu = float(row["Delivered_Bu"] or 0)
+        inventory_rows.append({
+            "Bin_Name": row["Bin_Name"],
+            "Note": None,
+            "Crop_Name": crop_label,
+            "Harvest_Bu": 0.0,
+            "Avg_MC": None,
+            "Delivered_Bu": round(delivered_bu, 2),
+            "Current_Bu": round(-delivered_bu, 2),
+        })
+
+    inventory_rows.sort(key=lambda x: ((x["Bin_Name"] or ""), (x["Crop_Name"] or "")))
+
+    summary = {}
+    for row in inventory_rows:
+        crop = row["Crop_Name"] or "-"
+        summary.setdefault(crop, {"Harvest": 0.0, "Delivered": 0.0, "Inventory": 0.0})
+        summary[crop]["Harvest"] += row["Harvest_Bu"]
+        summary[crop]["Delivered"] += row["Delivered_Bu"]
+        summary[crop]["Inventory"] += row["Current_Bu"]
+
+    corn_split = {
+        "Dry": {"Harvest": 0.0, "Delivered": 0.0, "Inventory": 0.0},
+        "HMC": {"Harvest": 0.0, "Delivered": 0.0, "Inventory": 0.0},
+    }
+    for row in inventory_rows:
+        crop_name_lower = (row["Crop_Name"] or "").lower()
+        if "corn" not in crop_name_lower:
+            continue
+        mc = row["Avg_MC"]
+        label = "Dry" if (mc is not None and mc <= 15.5) else "HMC"
+        corn_split[label]["Harvest"] += row["Harvest_Bu"]
+        corn_split[label]["Delivered"] += row["Delivered_Bu"]
+        corn_split[label]["Inventory"] += row["Current_Bu"]
+
+    return inventory_rows, summary, corn_split
+
 @app.route("/billing", methods=["GET"])
+@admin_required
 def billing():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
+    delivery_bu_sql = calculated_bushels_sql("d", "c")
 
     # Dropdown options
     cur.execute("SELECT DelLoc_ID, DelLoc_code, Location FROM Delivery_Location ORDER BY DelLoc_code;")
@@ -1017,7 +1759,7 @@ def billing():
           d.Gross_Weight      AS Gross,
           d.Tare_Weight       AS Tare,
           sl.Bin_Name         AS Storage,
-          d.Bushels           AS Bushels,
+          """ + delivery_bu_sql + """ AS Bushels,
           d.Price             AS Price
         FROM Delivery d
         JOIN Crop c ON d.Crop_ID = c.Crop_ID
@@ -1064,14 +1806,23 @@ def billing():
 
 
 @app.route("/reports")
+@login_required
 def reports():
     return render_template("reports.html")
 
 
 @app.route("/reconcile")
-#@login_required
+@login_required
 def reconcile():
-    return render_template("reconcile.html")
+    start = request.args.get("start")
+    end = request.args.get("end")
+    crop_id = request.args.get("crop_id", "")
+
+    start_date = date.fromisoformat(start) if start else (date.today() - timedelta(days=30))
+    end_date = date.fromisoformat(end) if end else date.today()
+
+    context = build_reconcile_context(start_date, end_date, crop_id)
+    return render_template("reconcile.html", **context)
 
 
 
@@ -1084,180 +1835,16 @@ def _f(x):
     return float(x)
 
 @app.route("/delivery", methods=["GET"])
+@login_required
 def delivery():
-    # filters
     start = request.args.get("start")
     end = request.args.get("end")
-    crop_id = request.args.get("crop_id", "")  # optional
+    crop_id = request.args.get("crop_id", "")
+    start_date = date.fromisoformat(start) if start else (date.today() - timedelta(days=30))
+    end_date = date.fromisoformat(end) if end else date.today()
 
-    if start:
-        start_date = date.fromisoformat(start)
-    else:
-        start_date = date.today() - timedelta(days=30)
-
-    if end:
-        end_date = date.fromisoformat(end)
-    else:
-        end_date = date.today()
-
-    conn = get_conn()
-    cur = conn.cursor(dictionary=True)
-
-    # dropdown crops
-    cur.execute("SELECT Crop_ID, Crop_Code, Crop_Name FROM Crop ORDER BY Crop_Code;")
-    crops = cur.fetchall()
-
-    crop_filter_sql = ""
-    params_h = [start_date, end_date]
-    params_d = [start_date, end_date]
-
-    if crop_id:
-        crop_filter_sql = " AND h.Crop_ID = %s "
-        params_h.append(crop_id)
-
-        crop_filter_sql_d = " AND d.Crop_ID = %s "
-        params_d.append(crop_id)
-    else:
-        crop_filter_sql_d = ""
-
-    # ------------------ SUMMARY TOTALS ------------------
-    # Harvest totals
-    cur.execute(f"""
-        SELECT
-          COUNT(*) AS harvest_rows,
-          AVG(h.MC) AS harvest_avg_mc,
-          SUM(COALESCE(h.Gross_Weight,0) - COALESCE(h.Tare_Weight,0)) AS harvest_lbs_wet,
-          SUM(COALESCE(h.Bushels,0)) AS harvest_bushels
-        FROM Harvest h
-        WHERE h.Harvest_Date BETWEEN %s AND %s
-        {crop_filter_sql}
-    """, tuple(params_h))
-    harvest_sum = cur.fetchone() or {}
-
-    # Delivery totals
-    cur.execute(f"""
-        SELECT
-          COUNT(*) AS delivery_rows,
-          AVG(d.MC) AS delivery_avg_mc,
-          SUM(COALESCE(d.Gross_Weight,0) - COALESCE(d.Tare_Weight,0)) AS delivery_lbs_wet,
-          SUM(COALESCE(d.Bushels,0)) AS delivery_bushels,
-          SUM(COALESCE(d.Gross_Sale,0)) AS delivery_gross_sale,
-          SUM(COALESCE(d.Sale_Discounts,0)) AS delivery_discounts,
-          SUM(COALESCE(d.Gross_Sale,0) - COALESCE(d.Sale_Discounts,0)) AS delivery_net_sale
-        FROM Delivery d
-        WHERE d.Delivery_Date BETWEEN %s AND %s
-        {crop_filter_sql_d}
-    """, tuple(params_d))
-    delivery_sum = cur.fetchone() or {}
-
-    # Differences (Delivery - Harvest)
-    diff = {
-        "bushels": _f(delivery_sum.get("delivery_bushels")) - _f(harvest_sum.get("harvest_bushels")),
-        "lbs_wet": _f(delivery_sum.get("delivery_lbs_wet")) - _f(harvest_sum.get("harvest_lbs_wet")),
-        "avg_mc":  (_f(delivery_sum.get("delivery_avg_mc")) - _f(harvest_sum.get("harvest_avg_mc")))
-    }
-
-    # ------------------ LOAD-LEVEL RECONCILIATION ------------------
-    # Full outer join simulation using UNION:
-    # match Harvest.Load_Num (varchar) with Delivery.Ticket_Num (int cast to char)
-    cur.execute(f"""
-        (
-          SELECT
-            h.Load_Num AS load_key,
-            h.Harvest_Date AS harvest_date,
-            f.Field_Name AS field_name,
-            sl.Bin_Name AS harvest_storage,
-            c.Crop_Code AS crop_code,
-            h.MC AS harvest_mc,
-            h.Gross_Weight AS harvest_gross,
-            h.Tare_Weight AS harvest_tare,
-            h.Bushels AS harvest_bushels,
-
-            d.Delivery_Date AS delivery_date,
-            dl.DelLoc_code AS delivered_to,
-            d.MC AS delivery_mc,
-            d.Gross_Weight AS delivery_gross,
-            d.Tare_Weight AS delivery_tare,
-            d.Bushels AS delivery_bushels,
-            d.Price AS price,
-            d.Gross_Sale AS gross_sale,
-            d.Sale_Discounts AS discounts,
-            (COALESCE(d.Gross_Sale,0) - COALESCE(d.Sale_Discounts,0)) AS net_sale,
-
-            'MATCH/LEFT' AS side
-          FROM Harvest h
-          JOIN Field f ON h.Field_ID = f.Field_ID
-          JOIN Crop c ON h.Crop_ID = c.Crop_ID
-          LEFT JOIN Storage_Location sl ON h.StorLoc_ID = sl.StorLoc_ID
-          LEFT JOIN Delivery d ON CAST(d.Ticket_Num AS CHAR) = h.Load_Num
-          LEFT JOIN Delivery_Location dl ON d.DelLoc_ID = dl.DelLoc_ID
-          WHERE h.Harvest_Date BETWEEN %s AND %s
-          {crop_filter_sql}
-        )
-        UNION
-        (
-          SELECT
-            CAST(d.Ticket_Num AS CHAR) AS load_key,
-            NULL AS harvest_date,
-            NULL AS field_name,
-            NULL AS harvest_storage,
-            c.Crop_Code AS crop_code,
-            NULL AS harvest_mc,
-            NULL AS harvest_gross,
-            NULL AS harvest_tare,
-            NULL AS harvest_bushels,
-
-            d.Delivery_Date AS delivery_date,
-            dl.DelLoc_code AS delivered_to,
-            d.MC AS delivery_mc,
-            d.Gross_Weight AS delivery_gross,
-            d.Tare_Weight AS delivery_tare,
-            d.Bushels AS delivery_bushels,
-            d.Price AS price,
-            d.Gross_Sale AS gross_sale,
-            d.Sale_Discounts AS discounts,
-            (COALESCE(d.Gross_Sale,0) - COALESCE(d.Sale_Discounts,0)) AS net_sale,
-
-            'RIGHT-ONLY' AS side
-          FROM Delivery d
-          JOIN Crop c ON d.Crop_ID = c.Crop_ID
-          LEFT JOIN Delivery_Location dl ON d.DelLoc_ID = dl.DelLoc_ID
-          LEFT JOIN Harvest h ON h.Load_Num = CAST(d.Ticket_Num AS CHAR)
-          WHERE d.Delivery_Date BETWEEN %s AND %s
-          {crop_filter_sql_d}
-          AND h.Harvest_ID IS NULL
-        )
-        ORDER BY load_key;
-    """, tuple(params_h + params_d))
-
-    rows = cur.fetchall()
-
-    # compute per-row diffs in python (easier than SQL)
-    for r in rows:
-        hb = r.get("harvest_bushels")
-        db = r.get("delivery_bushels")
-        r["bushel_diff"] = ( _f(db) - _f(hb) ) if (hb is not None or db is not None) else None
-
-        hg = r.get("harvest_gross")
-        ht = r.get("harvest_tare")
-        dg = r.get("delivery_gross")
-        dt = r.get("delivery_tare")
-        r["lbs_diff"] = (_f(dg) - _f(dt)) - (_f(hg) - _f(ht)) if (hg is not None or dg is not None) else None
-
-    cur.close()
-    conn.close()
-
-    return render_template(
-        "delivery.html",
-        crops=crops,
-        selected_crop_id=crop_id,
-        start_date=start_date,
-        end_date=end_date,
-        harvest_sum=harvest_sum,
-        delivery_sum=delivery_sum,
-        diff=diff,
-        rows=rows
-    )
+    context = build_reconcile_context(start_date, end_date, crop_id)
+    return render_template("delivery.html", **context)
 
 
 
@@ -1274,6 +1861,7 @@ def yield_report():
     field       = request.args.get("field", "").strip()
     crop        = request.args.get("crop", "").strip()
 
+    harvest_bu_sql = calculated_bushels_sql("h", "c")
     query = """
         SELECT
             fi.Crop_Year AS Crop_Year,
@@ -1283,14 +1871,14 @@ def yield_report():
             c.Crop_Name,
             fi.Acres,
 
-            SUM(h.Bushels) AS Total_Bushels,
-            ROUND(SUM(h.Bushels) / NULLIF(fi.Acres, 0), 2) AS Yield_bu_per_acre,
+            SUM(COALESCE(""" + harvest_bu_sql + """, 0)) AS Total_Bushels,
+            ROUND(SUM(COALESCE(""" + harvest_bu_sql + """, 0)) / NULLIF(fi.Acres, 0), 2) AS Yield_bu_per_acre,
 
             ROUND(AVG(h.MC), 2) AS Avg_MC,
 
-            SUM(h.WetBushels) AS Total_WetBushels,
-            SUM(h.DryBushels) AS Total_DryBushels,
-            ROUND(SUM(h.DryBushels) / NULLIF(fi.Acres, 0), 2) AS Dry_Yield_bu_per_acre
+            SUM(COALESCE(""" + harvest_bu_sql + """, 0)) AS Total_WetBushels,
+            SUM(COALESCE(""" + harvest_bu_sql + """, 0)) AS Total_DryBushels,
+            ROUND(SUM(COALESCE(""" + harvest_bu_sql + """, 0)) / NULLIF(fi.Acres, 0), 2) AS Dry_Yield_bu_per_acre
 
         FROM Harvest h
         JOIN Field fi       ON h.Field_ID = fi.Field_ID
@@ -1361,6 +1949,7 @@ def yield_export():
     field       = request.args.get("field", "").strip()
     crop        = request.args.get("crop", "").strip()
 
+    harvest_bu_sql = calculated_bushels_sql("h", "c")
     query = """
         SELECT
             fi.Crop_Year AS Crop_Year,
@@ -1370,14 +1959,14 @@ def yield_export():
             c.Crop_Name,
             fi.Acres,
 
-            SUM(h.Bushels) AS Total_Bushels,
-            ROUND(SUM(h.Bushels) / NULLIF(fi.Acres, 0), 2) AS Yield_bu_per_acre,
+            SUM(COALESCE(""" + harvest_bu_sql + """, 0)) AS Total_Bushels,
+            ROUND(SUM(COALESCE(""" + harvest_bu_sql + """, 0)) / NULLIF(fi.Acres, 0), 2) AS Yield_bu_per_acre,
 
             ROUND(AVG(h.MC), 2) AS Avg_MC,
 
-            SUM(h.WetBushels) AS Total_WetBushels,
-            SUM(h.DryBushels) AS Total_DryBushels,
-            ROUND(SUM(h.DryBushels) / NULLIF(fi.Acres, 0), 2) AS Dry_Yield_bu_per_acre
+            SUM(COALESCE(""" + harvest_bu_sql + """, 0)) AS Total_WetBushels,
+            SUM(COALESCE(""" + harvest_bu_sql + """, 0)) AS Total_DryBushels,
+            ROUND(SUM(COALESCE(""" + harvest_bu_sql + """, 0)) / NULLIF(fi.Acres, 0), 2) AS Dry_Yield_bu_per_acre
 
         FROM Harvest h
         JOIN Field fi       ON h.Field_ID = fi.Field_ID
@@ -1438,128 +2027,10 @@ def inventory_report():
     # Filters (optional)
     crop_year = request.args.get("crop_year", "").strip()   # from Field.Crop_Year
     crop_name = request.args.get("crop", "").strip()        # Crop.Crop_Name (contains search)
-
-    conn = get_conn()
-    cur = conn.cursor(dictionary=True)
-
-    # 1) Harvest totals by Bin + Crop
-    harvest_q = """
-        SELECT
-            s.StorLoc_ID,
-            s.Bin_Name,
-            c.Crop_Name,
-            SUM(COALESCE(h.DryBushels, h.Bushels, 0)) AS Harvest_Bu,
-            -- weighted avg MC by harvested bushels
-            CASE
-              WHEN SUM(COALESCE(h.DryBushels, h.Bushels, 0)) = 0 THEN NULL
-              ELSE SUM(COALESCE(h.DryBushels, h.Bushels, 0) * COALESCE(h.MC, 0))
-                   / SUM(COALESCE(h.DryBushels, h.Bushels, 0))
-            END AS Avg_MC
-        FROM Storage_Location s
-        LEFT JOIN Harvest h ON h.StorLoc_ID = s.StorLoc_ID
-        LEFT JOIN Crop c ON c.Crop_ID = h.Crop_ID
-        LEFT JOIN Field fi ON fi.Field_ID = h.Field_ID
-        WHERE 1=1
-    """
-    params = []
-
-    if crop_year:
-        harvest_q += " AND fi.Crop_Year = %s"
-        params.append(crop_year)
-
-    if crop_name:
-        harvest_q += " AND c.Crop_Name LIKE %s"
-        params.append(f"%{crop_name}%")
-
-    harvest_q += """
-        GROUP BY s.StorLoc_ID, s.Bin_Name, c.Crop_Name
-        ORDER BY s.Bin_Name, c.Crop_Name
-    """
-
-    cur.execute(harvest_q, params)
-    harvest_rows = cur.fetchall()
-
-    # 2) Delivered totals by Bin (out of bin)
-    delivery_q = """
-        SELECT
-            s.StorLoc_ID,
-            SUM(COALESCE(d.Bushels, 0)) AS Delivered_Bu
-        FROM Storage_Location s
-        LEFT JOIN Delivery d ON d.StorLoc_ID = s.StorLoc_ID
-        WHERE 1=1
-        GROUP BY s.StorLoc_ID
-    """
-    cur.execute(delivery_q)
-    delivery_rows = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    delivered_map = {r["StorLoc_ID"]: (r["Delivered_Bu"] or 0) for r in delivery_rows}
-
-    # Build per-bin output like Excel (one line per bin)
-    # If a bin has multiple crops, choose the crop with max harvest; if 0 harvest => "-"
-    bins = {}
-    for r in harvest_rows:
-        bin_id = r["StorLoc_ID"]
-        if bin_id not in bins:
-            bins[bin_id] = {
-                "bin_id": bin_id,
-                "bin_name": r["Bin_Name"],
-                "crop_name": "-",
-                "harvest_bu": 0.0,
-                "avg_mc": None,
-                "delivered_bu": delivered_map.get(bin_id, 0.0),
-            }
-
-        crop = r["Crop_Name"]
-        harvest_bu = float(r["Harvest_Bu"] or 0)
-        avg_mc = r["Avg_MC"]
-
-        # choose "main crop" by largest harvested bushels
-        if harvest_bu > bins[bin_id]["harvest_bu"]:
-            bins[bin_id]["crop_name"] = crop if crop else "-"
-            bins[bin_id]["harvest_bu"] = harvest_bu
-            bins[bin_id]["avg_mc"] = float(avg_mc) if avg_mc is not None else None
-
-    # Include bins that had no harvest rows at all
-    # (Harvest query returns all bins via LEFT JOIN but Crop_Name might be NULL; still OK)
-    inventory_rows = []
-    for bin_id, b in bins.items():
-        current = (b["harvest_bu"] or 0) - (b["delivered_bu"] or 0)
-        inventory_rows.append({
-            "Bin_Name": b["bin_name"],
-            "Note": None,  # you can map a note if you later add a column
-            "Crop_Name": b["crop_name"] if b["crop_name"] else "-",
-            "Harvest_Bu": round(b["harvest_bu"] or 0, 2),
-            "Avg_MC": None if b["avg_mc"] is None else round(b["avg_mc"], 2),
-            "Delivered_Bu": round(b["delivered_bu"] or 0, 2),
-            "Current_Bu": round(current, 2),
-        })
-
-    # Sort bins like Excel
-    inventory_rows.sort(key=lambda x: (x["Bin_Name"] or ""))
-
-    # Summary (right side of Excel): totals by crop
-    summary = {}
-    for r in inventory_rows:
-        crop = r["Crop_Name"] or "-"
-        summary.setdefault(crop, {"Harvest": 0.0, "Delivered": 0.0, "Inventory": 0.0})
-        summary[crop]["Harvest"] += r["Harvest_Bu"]
-        summary[crop]["Delivered"] += r["Delivered_Bu"]
-        summary[crop]["Inventory"] += r["Current_Bu"]
-
-    # Optional: split Corn into Dry/HMC based on MC like many sheets do
-    # (Only if crop contains "Corn")
-    corn_split = {"Dry": {"Harvest": 0.0, "Delivered": 0.0, "Inventory": 0.0},
-                  "HMC": {"Harvest": 0.0, "Delivered": 0.0, "Inventory": 0.0}}
-    for r in inventory_rows:
-        if r["Crop_Name"] and "corn" in r["Crop_Name"].lower():
-            mc = r["Avg_MC"]
-            label = "Dry" if (mc is not None and mc <= 15.5) else "HMC"
-            corn_split[label]["Harvest"] += r["Harvest_Bu"]
-            corn_split[label]["Delivered"] += r["Delivered_Bu"]
-            corn_split[label]["Inventory"] += r["Current_Bu"]
+    inventory_rows, summary, corn_split = build_inventory_snapshot(
+        crop_year=crop_year,
+        crop_name=crop_name,
+    )
 
     active_filters = {"crop_year": crop_year, "crop": crop_name}
 
@@ -1578,91 +2049,21 @@ def inventory_export():
     # same filters
     crop_year = request.args.get("crop_year", "").strip()
     crop_name = request.args.get("crop", "").strip()
-
-    # Reuse the page function logic by calling it directly is not ideal;
-    # easiest is to call inventory_report logic again, but here we keep it simple:
-    # (Call the report and rebuild from returned context is messy)
-    # So: just redirect users to copy/paste, OR implement export same query style.
-    # We'll implement export by calling inventory_report() data logic quickly:
-
-    # ---- Quick internal call: duplicate minimal extraction ----
-    conn = get_conn()
-    cur = conn.cursor(dictionary=True)
-
-    harvest_q = """
-        SELECT
-            s.StorLoc_ID,
-            s.Bin_Name,
-            c.Crop_Name,
-            SUM(COALESCE(h.DryBushels, h.Bushels, 0)) AS Harvest_Bu,
-            CASE
-              WHEN SUM(COALESCE(h.DryBushels, h.Bushels, 0)) = 0 THEN NULL
-              ELSE SUM(COALESCE(h.DryBushels, h.Bushels, 0) * COALESCE(h.MC, 0))
-                   / SUM(COALESCE(h.DryBushels, h.Bushels, 0))
-            END AS Avg_MC
-        FROM Storage_Location s
-        LEFT JOIN Harvest h ON h.StorLoc_ID = s.StorLoc_ID
-        LEFT JOIN Crop c ON c.Crop_ID = h.Crop_ID
-        LEFT JOIN Field fi ON fi.Field_ID = h.Field_ID
-        WHERE 1=1
-    """
-    params = []
-    if crop_year:
-        harvest_q += " AND fi.Crop_Year = %s"
-        params.append(crop_year)
-    if crop_name:
-        harvest_q += " AND c.Crop_Name LIKE %s"
-        params.append(f"%{crop_name}%")
-    harvest_q += " GROUP BY s.StorLoc_ID, s.Bin_Name, c.Crop_Name"
-
-    cur.execute(harvest_q, params)
-    harvest_rows = cur.fetchall()
-
-    delivery_q = """
-        SELECT s.StorLoc_ID, SUM(COALESCE(d.Bushels,0)) AS Delivered_Bu
-        FROM Storage_Location s
-        LEFT JOIN Delivery d ON d.StorLoc_ID = s.StorLoc_ID
-        GROUP BY s.StorLoc_ID
-    """
-    cur.execute(delivery_q)
-    delivery_rows = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    delivered_map = {r["StorLoc_ID"]: (r["Delivered_Bu"] or 0) for r in delivery_rows}
-
-    bins = {}
-    for r in harvest_rows:
-        bid = r["StorLoc_ID"]
-        bins.setdefault(bid, {
-            "BIN LOCATION": r["Bin_Name"],
-            "Note": "",
-            "CROP": "-",
-            "HARVEST": 0.0,
-            "MC": None,
-            "DELIVERED": delivered_map.get(bid, 0.0),
-        })
-        hb = float(r["Harvest_Bu"] or 0)
-        if hb > bins[bid]["HARVEST"]:
-            bins[bid]["CROP"] = r["Crop_Name"] or "-"
-            bins[bid]["HARVEST"] = hb
-            bins[bid]["MC"] = None if r["Avg_MC"] is None else float(r["Avg_MC"])
-
-    out = []
-    for bid, b in bins.items():
-        current = (b["HARVEST"] or 0) - (b["DELIVERED"] or 0)
-        out.append({
-            "BIN LOCATION": b["BIN LOCATION"],
-            "Note": b["Note"],
-            "CROP": b["CROP"],
-            "HARVEST": round(b["HARVEST"], 2),
-            "MC": None if b["MC"] is None else round(b["MC"], 2),
-            "DELIVERED": round(b["DELIVERED"], 2),
-            "CURRENT": round(current, 2),
-        })
-
-    df = pd.DataFrame(out).sort_values("BIN LOCATION")
+    rows, _, _ = build_inventory_snapshot(crop_year=crop_year, crop_name=crop_name)
+    df = pd.DataFrame([
+        {
+            "BIN LOCATION": row["Bin_Name"],
+            "Note": row["Note"] or "",
+            "CROP": row["Crop_Name"],
+            "HARVEST": row["Harvest_Bu"],
+            "MC": row["Avg_MC"],
+            "DELIVERED": row["Delivered_Bu"],
+            "CURRENT": row["Current_Bu"],
+        }
+        for row in rows
+    ])
+    if not df.empty:
+        df = df.sort_values(["BIN LOCATION", "CROP"])
 
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -1671,6 +2072,28 @@ def inventory_export():
     output.seek(0)
 
     return send_file(output, as_attachment=True, download_name="Inventory_Report.xlsx")
+
+
+# @app.route("/slingshot/import")
+# @login_required
+# def slingshot_import():
+#     try:
+#         run_slingshot_import()
+#         return {"status": "ok", "message": "Slingshot import completed"}
+#     except Exception as e:
+#         return {"status": "error", "message": str(e)}, 500
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

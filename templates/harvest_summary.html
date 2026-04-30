@@ -10,11 +10,11 @@
 
     <div class="d-flex gap-2">
       <a
-        href="{{ url_for('harvest_query', field_id=selected_field, storloc_id=selected_storage) }}"
-        class="btn btn-primary w-100"
-      >
-        Back to Harvest Query
-      </a>
+  href="{{ url_for('harvest_query', field_name=selected_field, storloc_id=selected_storage, crop_year=selected_year) }}"
+  class="btn btn-primary w-100"
+>
+  Back to Harvest Query
+</a>
       <!-- <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Home</a> -->
     </div>
   </div>

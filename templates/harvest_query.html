@@ -1,54 +1,42 @@
 {% extends "base.html" %}
 
-{% block title %}Billing | GMS{% endblock %}
+{% block title %}Harvest Query | GMS{% endblock %}
 
 {% block content %}
 <div class="container py-4">
 
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="mb-0 ">Harvest Query</h1>
-    <!-- <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Home</a> -->
+    <h1 class="mb-0">Harvest Query</h1>
   </div>
 
-
-
-
-<div class="d-flex justify-content-between align-items-center mb-3">
-  
-  <!-- <h1 class="mb-0">Harvest Query</h1>-->
-
-  <div class="d-flex gap-2">
-    <a
-      href="{{ url_for('harvest_summary', field_id=selected_field, storloc_id=selected_storage) }}"
-      class="btn btn-primary w-100"
-  
-    >
-      Harvest Summary
-    </a>
-
-    <!-- <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Home</a>-->
-  </div>
-</div>
-
-
-
-
-  <!-- Filter bar (Field + Storage dropdowns like Excel idea) -->
-  <form method="get" class="row g-2 align-items-end">
-    <div class="col-md-4">
-      <label class="form-label ">Field</label>
-      <select class="form-select" name="field_id">
-        <option value="">-- All Fields --</option>
-        {% for f in fields %}
-          <option value="{{ f.Field_ID }}" {% if selected_field|string == f.Field_ID|string %}selected{% endif %}>
-            {{ f.Field_Name }}
+  <!-- Filter bar -->
+  <form method="get" action="{{ url_for('harvest_query') }}" class="row g-2 align-items-end" id="harvest-filter-form">
+    <div class="col-md-2">
+      <label class="form-label">Year</label>
+      <select class="form-select" name="crop_year" id="filter-year">
+        <option value="">-- All Years --</option>
+        {% for y in years %}
+          <option value="{{ y.Crop_Year }}" {% if selected_year|string == y.Crop_Year|string %}selected{% endif %}>
+            {{ y.Crop_Year }}
           </option>
         {% endfor %}
       </select>
     </div>
 
-    <div class="col-md-4">
-      <label class="form-label ">Storage</label>
+    <div class="col-md-3">
+      <label class="form-label">Field</label>
+      <select class="form-select" name="field_id" id="filter-field">
+        <option value="">-- All Fields --</option>
+        {% for f in fields %}
+          <option value="{{ f.Field_ID }}" {% if selected_field_id|string == f.Field_ID|string %}selected{% endif %}>
+            {{ f.Field_Name }}{% if f.Crop_Year %} - {{ f.Crop_Year }}{% endif %}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-3">
+      <label class="form-label">Storage</label>
       <select class="form-select" name="storloc_id">
         <option value="">-- All Storage --</option>
         {% for s in storages %}
@@ -59,49 +47,68 @@
       </select>
     </div>
 
-    <div class="col-md-4">
-      <button class="btn btn-primary w-100" type="submit">Apply Filter</button>
+    <div class="col-md-2">
+      <button class="btn btn-primary w-100" type="submit">Filter Data</button>
+    </div>
+
+    <div class="col-md-2">
+      <button
+        class="btn btn-outline-primary w-100"
+        type="submit"
+        formaction="{{ url_for('harvest_summary') }}"
+        formmethod="get">
+        Harvest Summary
+      </button>
     </div>
   </form>
 
   <hr class="my-4">
 
-  <!-- Add new load (Excel-like input row) -->
-  <h4 class="mb-3 ">Add Harvest Load</h4>
+  <!-- Add or edit load -->
+  <h4 class="mb-3" id="harvest-load-form">
+    {% if edit_load %}Edit Harvest Load{% else %}Add Harvest Load{% endif %}
+  </h4>
 
   {% if error %}
     <div class="alert alert-danger">{{ error }}</div>
   {% endif %}
 
-  <form method="post" class="row g-2">
+  <form
+    method="post"
+    class="row g-2"
+    action="{{ url_for('harvest_query', field_id=selected_field_id, field_name=selected_field, storloc_id=selected_storage, crop_year=selected_year) }}">
+    {% if edit_load %}
+      <input type="hidden" name="harvest_id" value="{{ edit_load.Harvest_ID }}">
+    {% endif %}
+
     <div class="col-md-2">
-      <label class="form-label ">Load</label>
-      <input class="form-control" name="load_num" required>
+      <label class="form-label">Load</label>
+      <input class="form-control" name="load_num" value="{{ edit_load.Load_Num if edit_load else '' }}" required>
     </div>
 
     <div class="col-md-2">
-      <label class="form-label ">Date</label>
-      <input type="date" class="form-control" name="harvest_date" required>
+      <label class="form-label">Date</label>
+      <input type="date" class="form-control" name="harvest_date" value="{{ edit_load.Harvest_Date if edit_load else '' }}" required>
     </div>
 
     <div class="col-md-3">
-      <label class="form-label ">Field</label>
+      <label class="form-label">Field</label>
       <select class="form-select" name="field_id" required>
         <option value="">-- Select Field --</option>
-        {% for f in fields %}
-          <option value="{{ f.Field_ID }}" {% if selected_field|string == f.Field_ID|string %}selected{% endif %}>
-            {{ f.Field_Name }}
+        {% for f in entry_fields %}
+          <option value="{{ f.Field_ID }}" {% if edit_load and edit_load.Field_ID|string == f.Field_ID|string %}selected{% endif %}>
+            {{ f.Field_Name }} - {{ f.Crop_Year }}
           </option>
         {% endfor %}
       </select>
     </div>
 
     <div class="col-md-3">
-      <label class="form-label ">Storage</label>
-      <select class="form-select" name="storloc_id" required>
+      <label class="form-label">Storage</label>
+      <select class="form-select" name="storloc_id" {% if not edit_load %}required{% endif %}>
         <option value="">-- Select Storage --</option>
         {% for s in storages %}
-          <option value="{{ s.StorLoc_ID }}" {% if selected_storage|string == s.StorLoc_ID|string %}selected{% endif %}>
+          <option value="{{ s.StorLoc_ID }}" {% if edit_load and edit_load.StorLoc_ID|string == s.StorLoc_ID|string %}selected{% endif %}>
             {{ s.Bin_Name }}
           </option>
         {% endfor %}
@@ -109,62 +116,90 @@
     </div>
 
     <div class="col-md-2">
-      <label class="form-label ">Crop</label>
+      <label class="form-label">Crop</label>
       <select class="form-select" name="crop_id" required>
         <option value="">-- Select Crop --</option>
         {% for c in crops %}
-          <option value="{{ c.Crop_ID }}">{{ c.Crop_Name }}</option>
+          <option value="{{ c.Crop_ID }}" {% if edit_load and edit_load.Crop_ID|string == c.Crop_ID|string %}selected{% endif %}>
+            {{ c.Crop_Name }}
+          </option>
         {% endfor %}
       </select>
     </div>
 
     <div class="col-md-2">
-      <label class="form-label ">Cart</label>
+      <label class="form-label">Cart</label>
       <select class="form-select" name="cart_id" required>
         <option value="">-- Select Cart --</option>
         {% for c in carts %}
-          <option value="{{ c.Cart_ID }}">{{ c.Cart_Name }}</option>
+          <option value="{{ c.Cart_ID }}" {% if edit_load and edit_load.Cart_ID|string == c.Cart_ID|string %}selected{% endif %}>
+            {{ c.Cart_Name }}
+          </option>
         {% endfor %}
       </select>
     </div>
 
     <div class="col-md-2">
-      <label class="form-label ">MC</label>
-      <input type="number" step="0.01" class="form-control" name="mc">
+      <label class="form-label">MC</label>
+      <input type="number" step="0.01" class="form-control" name="mc" value="{{ edit_load.MC if edit_load and edit_load.MC is not none else '' }}">
     </div>
 
     <div class="col-md-2">
-      <label class="form-label ">Gross</label>
-      <input type="number" step="0.01" class="form-control" name="gross">
+      <label class="form-label">Gross</label>
+      <input type="number" step="0.01" class="form-control" name="gross" value="{{ edit_load.Gross_Weight if edit_load and edit_load.Gross_Weight is not none else '' }}">
     </div>
 
     <div class="col-md-2">
-      <label class="form-label ">Tare</label>
-      <input type="number" step="0.01" class="form-control" name="tare">
+      <label class="form-label">Tare</label>
+      <input type="number" step="0.01" class="form-control" name="tare" value="{{ edit_load.Tare_Weight if edit_load and edit_load.Tare_Weight is not none else '' }}">
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label">Bushels</label>
+      <input type="text" class="form-control" name="Bushels" value="Auto-calculated" readonly>
     </div>
 
     <div class="col-md-4">
-      <label class="form-label ">Note</label>
-      <input class="form-control" name="note">
+      <label class="form-label">Note</label>
+      <input class="form-control" name="note" value="{{ edit_load.Note if edit_load and edit_load.Note else '' }}">
     </div>
 
     <div class="col-md-12 mt-2">
-      <button class="btn btn-success" type="submit">Save Load</button>
+      <button class="btn btn-success" type="submit">
+        {% if edit_load %}Update Load{% else %}Save Load{% endif %}
+      </button>
+      {% if edit_load %}
+        <a
+          class="btn btn-outline-secondary ms-2"
+          href="{{ url_for('harvest_query', field_id=selected_field_id, field_name=selected_field, storloc_id=selected_storage, crop_year=selected_year) }}">
+          Cancel Edit
+        </a>
+      {% endif %}
     </div>
   </form>
 
   <hr class="my-4">
 
   <!-- Results table -->
-  <h4 class="mb-3  text-white">Loads</h4>
+  <h4 class="mb-3">Loads</h4>
 
   {% if loads %}
     <div class="table-responsive">
       <table class="table table-striped table-hover align-middle">
         <thead>
           <tr>
-            <th>Load</th><th>Date</th><th>Field</th><th>Crop</th><th>MC</th>
-            <th>Gross</th><th>Tare</th><th>Storage</th><th>Bushels</th><th>Note</th>
+            <th>Load</th>
+            <th>Date</th>
+            <th>Field</th>
+            <th>Year</th>
+            <th>Crop</th>
+            <th>MC</th>
+            <th>Gross</th>
+            <th>Tare</th>
+            <th>Storage</th>
+            <th>Bushels</th>
+            <th>Note</th>
+            <th>Edit</th>
           </tr>
         </thead>
         <tbody>
@@ -173,13 +208,21 @@
             <td>{{ r.Load_Num }}</td>
             <td>{{ r.Harvest_Date }}</td>
             <td>{{ r.Field_Name }}</td>
+            <td>{{ r.Crop_Year }}</td>
             <td>{{ r.Crop_Name }}</td>
-            <td>{{ r.MC }}</td>
-            <td>{{ r.Gross_Weight }}</td>
-            <td>{{ r.Tare_Weight }}</td>
+            <td>{{ r.MC if r.MC is not none else "-" }}</td>
+            <td>{{ r.Gross_Weight if r.Gross_Weight is not none else "-" }}</td>
+            <td>{{ r.Tare_Weight if r.Tare_Weight is not none else "-" }}</td>
             <td>{{ r.Storage }}</td>
-            <td>{{ r.Bushels }}</td>
-            <td>{{ r.Note }}</td>
+            <td>{{ "{:,.1f}".format(r.Calculated_Bushels) if r.Calculated_Bushels is not none else "-" }}</td>
+            <td>{{ r.Note if r.Note else "-" }}</td>
+            <td>
+              <a
+                class="btn btn-sm btn-outline-primary"
+                href="{{ url_for('harvest_query', field_id=selected_field_id, field_name=selected_field, storloc_id=selected_storage, crop_year=selected_year, edit_id=r.Harvest_ID, _anchor='harvest-load-form') }}">
+                Edit
+              </a>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -189,45 +232,56 @@
     <p>No loads found for the selected filter.</p>
   {% endif %}
 
-
   <div class="row g-3 mt-4">
-  <div class="col-md-3">
-    <div class="p-3 bg-white border rounded">
-      <div class="text-muted">MC%</div>
-      <div class="fs-4">
-        {% if mc_avg is not none %}{{ "%.1f"|format(mc_avg) }}{% else %}-{% endif %}
+    <div class="col-md-3">
+      <div class="p-3 bg-white border rounded">
+        <div class="text-muted">MC%</div>
+        <div class="fs-4">
+          {% if mc_avg is not none %}{{ "%.1f"|format(mc_avg) }}{% else %}-{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <div class="p-3 bg-white border rounded">
+        <div class="text-muted">Lbs. Wet</div>
+        <div class="fs-4">
+          {% if lbs_wet is not none %}{{ "{:,.0f}".format(lbs_wet) }}{% else %}-{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <div class="p-3 bg-white border rounded">
+        <div class="text-muted">Bu. Wet</div>
+        <div class="fs-4">
+          {% if bu_wet is not none %}{{ "{:,.0f}".format(bu_wet) }}{% else %}-{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <div class="p-3 bg-white border rounded">
+        <div class="text-muted">Dry Bushels</div>
+        <div class="fs-4">
+          {% if dry_bushels is not none %}{{ "{:,.1f}".format(dry_bushels) }}{% else %}-{% endif %}
+        </div>
       </div>
     </div>
   </div>
 
-  <div class="col-md-3">
-    <div class="p-3 bg-white border rounded">
-      <div class="text-muted">Lbs. Wet</div>
-      <div class="fs-4">
-        {% if lbs_wet is not none %}{{ "{:,.0f}".format(lbs_wet) }}{% else %}-{% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="col-md-3">
-    <div class="p-3 bg-white border rounded">
-      <div class="text-muted">Bu. Wet</div>
-      <div class="fs-4">
-        {% if bu_wet is not none %}{{ "{:,.0f}".format(bu_wet) }}{% else %}-{% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="col-md-3">
-    <div class="p-3 bg-white border rounded">
-      <div class="text-muted">Dry Bushels</div>
-      <div class="fs-4">
-        {% if dry_bushels is not none %}{{ "{:,.1f}".format(dry_bushels) }}{% else %}-{% endif %}
-      </div>
-    </div>
-  </div>
 </div>
 
+<script>
+  const filterForm = document.getElementById("harvest-filter-form");
+  const yearSelect = document.getElementById("filter-year");
+  const fieldSelect = document.getElementById("filter-field");
 
-</div>
+  if (filterForm && yearSelect && fieldSelect) {
+    yearSelect.addEventListener("change", () => {
+      fieldSelect.value = "";
+      filterForm.submit();
+    });
+  }
+</script>
 {% endblock %}
