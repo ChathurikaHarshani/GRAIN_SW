@@ -22,8 +22,7 @@
       </p>
 
       <p class="text-muted mb-4">
-        It provides role-based secure access, automated reporting, and real-time inventory tracking
-        to improve operational efficiency and financial accuracy.
+        Showing live operational data for crop year {{ dashboard_data.year }}.
       </p>
 
       <div class="d-flex flex-wrap gap-2">
@@ -84,10 +83,10 @@
     <div class="main-content shadow-sm text-center h-100 gms-card kpi-card">
       <div class="d-flex justify-content-center align-items-center gap-2 mb-1">
         <i class="bi bi-bar-chart-line fs-4 text-primary"></i>
-        <h6 class="text-muted mb-0">Total Bushels (YTD)</h6>
+        <h6 class="text-muted mb-0">Harvest Bushels</h6>
       </div>
-      <div class="kpi-number" id="kpiBushels">125,430</div>
-      <small class="text-muted">Sample value</small>
+      <div class="kpi-number" id="kpiBushels">{{ "{:,.0f}".format(dashboard_data.total_bushels) }}</div>
+      <small class="text-muted">Crop year {{ dashboard_data.year }}</small>
     </div>
   </div>
 
@@ -97,19 +96,19 @@
         <i class="bi bi-people fs-4 text-primary"></i>
         <h6 class="text-muted mb-0">Active Growers</h6>
       </div>
-      <div class="kpi-number" id="kpiGrowers">38</div>
-      <small class="text-muted">Sample value</small>
+      <div class="kpi-number" id="kpiGrowers">{{ dashboard_data.active_growers }}</div>
+      <small class="text-muted">With harvest loads in {{ dashboard_data.year }}</small>
     </div>
   </div>
 
   <div class="col-md-4">
     <div class="main-content shadow-sm text-center h-100 gms-card kpi-card">
       <div class="d-flex justify-content-center align-items-center gap-2 mb-1">
-        <i class="bi bi-hourglass-split fs-4 text-primary"></i>
-        <h6 class="text-muted mb-0">Pending Deliveries</h6>
+        <i class="bi bi-box-seam fs-4 text-primary"></i>
+        <h6 class="text-muted mb-0">Current Inventory</h6>
       </div>
-      <div class="kpi-number" id="kpiPending">12</div>
-      <small class="text-muted">Sample value</small>
+      <div class="kpi-number" id="kpiInventory">{{ "{:,.0f}".format(dashboard_data.current_inventory) }}</div>
+      <small class="text-muted">Bushels by storage location</small>
     </div>
   </div>
 </div>
@@ -125,7 +124,8 @@
         <div>
           <h5 class="fw-bold mb-1">Delivery & Inventory</h5>
           <p class="text-muted mb-0">
-            Track deliveries by location and maintain accurate inventory balances.
+            {{ dashboard_data.delivery_count }} delivery records and
+            {{ "{:,.0f}".format(dashboard_data.delivered_bushels) }} delivered bushels in {{ dashboard_data.year }}.
           </p>
         </div>
       </div>
@@ -141,7 +141,7 @@
         <div>
           <h5 class="fw-bold mb-1">Billing & Reconciliation</h5>
           <p class="text-muted mb-0">
-            Generate billing summaries and reconcile bushels to identify discrepancies.
+            {{ dashboard_data.load_count }} harvest loads are available for reporting and reconciliation.
           </p>
         </div>
       </div>
@@ -157,7 +157,7 @@
         <div>
           <h5 class="fw-bold mb-1">Role-Based Access</h5>
           <p class="text-muted mb-0">
-            Admin and user permissions for secure access and clean workflows.
+            {{ dashboard_data.user_count }} active users, including {{ dashboard_data.admin_count }} admin users.
           </p>
         </div>
       </div>
@@ -171,7 +171,7 @@
     <div class="main-content shadow-sm h-100 gms-card">
       <div class="d-flex align-items-center justify-content-between mb-2">
         <h5 class="fw-bold mb-0">Monthly Delivered Bushels</h5>
-        <span class="badge text-bg-light border">Sample</span>
+        <span class="badge text-bg-light border">{{ dashboard_data.year }}</span>
       </div>
       <canvas id="deliveriesChart" height="120"></canvas>
     </div>
@@ -181,7 +181,7 @@
     <div class="main-content shadow-sm h-100 gms-card">
       <div class="d-flex align-items-center justify-content-between mb-2">
         <h5 class="fw-bold mb-0">Inventory by Location</h5>
-        <span class="badge text-bg-light border">Sample</span>
+        <span class="badge text-bg-light border">Live data</span>
       </div>
       <canvas id="inventoryChart" height="120"></canvas>
     </div>
@@ -197,14 +197,26 @@
 <!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
+<script id="dashboard-chart-data" type="application/json">
+  {{ dashboard_data | tojson }}
+</script>
+
 <script>
+  const dashboardChartData = JSON.parse(
+    document.getElementById('dashboard-chart-data').textContent
+  );
+  const monthlyDeliveryLabels = dashboardChartData.monthly_delivery_labels;
+  const monthlyDeliveryBushels = dashboardChartData.monthly_delivery_bushels;
+  const inventoryLabels = dashboardChartData.inventory_labels;
+  const inventoryBushels = dashboardChartData.inventory_bushels;
+
   new Chart(document.getElementById('deliveriesChart'), {
     type: 'line',
     data: {
-      labels: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
+      labels: monthlyDeliveryLabels,
       datasets: [{
         label: 'Bushels',
-        data: [1200, 1500, 1800, 1600, 2100, 2400, 2200, 2000, 1900, 2300, 2500, 2700],
+        data: monthlyDeliveryBushels,
         tension: 0.3
       }]
     },
@@ -218,10 +230,10 @@
   new Chart(document.getElementById('inventoryChart'), {
     type: 'bar',
     data: {
-      labels: ['ADM', 'Cargill', 'Frontier', 'Mead', 'Coop'],
+      labels: inventoryLabels,
       datasets: [{
         label: 'Inventory (bushels)',
-        data: [5200, 4100, 3600, 2800, 4500]
+        data: inventoryBushels
       }]
     },
     options: {

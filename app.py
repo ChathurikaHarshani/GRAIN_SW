@@ -207,7 +207,109 @@ def health():
 @app.route("/app")
 @login_required
 def dashboard():
-    return render_template("index.html", app_name="GMS")
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    harvest_bu_sql = calculated_bushels_sql("h", "c")
+    delivery_bu_sql = calculated_bushels_sql("d", "c")
+
+    cur.execute("""
+        SELECT MAX(Crop_Year) AS crop_year
+        FROM Field
+        WHERE Crop_Year IS NOT NULL;
+    """)
+    year_row = cur.fetchone() or {}
+    dashboard_year = year_row.get("crop_year") or date.today().year
+
+    cur.execute(f"""
+        SELECT COALESCE(SUM(COALESCE({harvest_bu_sql}, 0)), 0) AS total_bushels,
+               COUNT(*) AS load_count
+        FROM Harvest h
+        JOIN Crop c ON h.Crop_ID = c.Crop_ID
+        JOIN Field f ON h.Field_ID = f.Field_ID
+        WHERE f.Crop_Year = %s;
+    """, (dashboard_year,))
+    harvest_totals = cur.fetchone() or {}
+
+    cur.execute("""
+        SELECT COUNT(DISTINCT g.Grower_ID) AS active_growers
+        FROM Grower g
+        JOIN Department d ON d.Grower_ID = g.Grower_ID
+        JOIN Field f ON f.Dpt_ID = d.Dpt_ID
+        JOIN Harvest h ON h.Field_ID = f.Field_ID
+        WHERE f.Crop_Year = %s;
+    """, (dashboard_year,))
+    grower_totals = cur.fetchone() or {}
+
+    cur.execute("""
+        SELECT COUNT(*) AS user_count,
+               SUM(CASE WHEN role = 'admin' THEN 1 ELSE 0 END) AS admin_count
+        FROM users
+        WHERE is_active = 1;
+    """)
+    user_totals = cur.fetchone() or {}
+
+    cur.execute(f"""
+        SELECT
+            MONTH(d.Delivery_Date) AS delivery_month,
+            COALESCE(SUM(COALESCE({delivery_bu_sql}, 0)), 0) AS bushels
+        FROM Delivery d
+        JOIN Crop c ON d.Crop_ID = c.Crop_ID
+        WHERE YEAR(d.Delivery_Date) = %s
+        GROUP BY MONTH(d.Delivery_Date)
+        ORDER BY MONTH(d.Delivery_Date);
+    """, (dashboard_year,))
+    monthly_rows = cur.fetchall()
+
+    cur.execute(f"""
+        SELECT COALESCE(SUM(COALESCE({delivery_bu_sql}, 0)), 0) AS delivered_bushels,
+               COUNT(*) AS delivery_count
+        FROM Delivery d
+        JOIN Crop c ON d.Crop_ID = c.Crop_ID
+        WHERE YEAR(d.Delivery_Date) = %s;
+    """, (dashboard_year,))
+    delivery_totals = cur.fetchone() or {}
+
+    cur.close()
+    conn.close()
+
+    inventory_rows, _, _ = build_inventory_snapshot(crop_year=str(dashboard_year))
+    inventory_by_location = {}
+    for row in inventory_rows:
+        location = row.get("Bin_Name") or "Unassigned"
+        inventory_by_location[location] = inventory_by_location.get(location, 0.0) + _to_float(row.get("Current_Bu"))
+
+    top_inventory = sorted(
+        inventory_by_location.items(),
+        key=lambda item: abs(item[1]),
+        reverse=True
+    )[:8]
+
+    month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    monthly_bushels = [0.0] * 12
+    for row in monthly_rows:
+        month_index = int(row["delivery_month"]) - 1
+        if 0 <= month_index < 12:
+            monthly_bushels[month_index] = round(_to_float(row.get("bushels")), 1)
+
+    current_inventory = sum(inventory_by_location.values())
+
+    dashboard_data = {
+        "year": dashboard_year,
+        "total_bushels": _to_float(harvest_totals.get("total_bushels")),
+        "load_count": int(harvest_totals.get("load_count") or 0),
+        "active_growers": int(grower_totals.get("active_growers") or 0),
+        "current_inventory": current_inventory,
+        "delivered_bushels": _to_float(delivery_totals.get("delivered_bushels")),
+        "delivery_count": int(delivery_totals.get("delivery_count") or 0),
+        "user_count": int(user_totals.get("user_count") or 0),
+        "admin_count": int(user_totals.get("admin_count") or 0),
+        "monthly_delivery_labels": month_labels,
+        "monthly_delivery_bushels": monthly_bushels,
+        "inventory_labels": [item[0] for item in top_inventory],
+        "inventory_bushels": [round(item[1], 1) for item in top_inventory],
+    }
+
+    return render_template("index.html", app_name="GMS", dashboard_data=dashboard_data)
 
 
 
