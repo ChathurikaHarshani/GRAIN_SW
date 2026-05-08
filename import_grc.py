@@ -62,8 +62,9 @@ python import_grc.py 93438245-93438260
 from __future__ import annotations
 
 import os
+import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 import pymysql
@@ -97,6 +98,13 @@ def safe_decimal(value: Any) -> Optional[float]:
         return float(s)
     except Exception:
         return None
+
+
+def safe_moisture(value: Any) -> Optional[float]:
+    moisture = safe_decimal(value)
+    if moisture is None or moisture <= 0:
+        return None
+    return moisture
 
 
 def safe_date(value: Any) -> Optional[datetime.date]:
@@ -147,11 +155,76 @@ def normalize_destination(dest: Any) -> Optional[str]:
     return str(dest).strip()
 
 
+def normalize_storage_lookup(value: Any) -> str:
+    if value in (None, "", "null"):
+        return ""
+    return re.sub(r"[^a-z0-9]", "", str(value).strip().lower())
+
+
+def destination_to_bin_code(destination_code: Optional[str]) -> Optional[str]:
+    if not destination_code:
+        return None
+
+    text = str(destination_code).strip()
+    compact = normalize_storage_lookup(text)
+
+    bin_match = re.search(r"\bbin\s*-?\s*(\d+)\b", text, flags=re.IGNORECASE)
+    if bin_match:
+        return f"Bin{int(bin_match.group(1))}"
+
+    if compact.isdigit():
+        return f"Bin{int(compact)}"
+
+    aliases = {
+        "hmcbeef": "HMC Beef",
+        "feedmill": "ANF",
+        "feedmillbins": "ANF",
+        "feedmillbin": "ANF",
+        "beeffeedlot": "ANB",
+        "beefmill": "ANB",
+    }
+    return aliases.get(compact, text)
+
+
 def normalize_variety(variety: Any) -> Optional[str]:
     if variety in (None, "", "null"):
         return None
     text = str(variety).strip()
     return text if text else None
+
+
+def parse_slingshot_timestamp(value: Any) -> Optional[datetime]:
+    if value in (None, "", "null"):
+        return None
+
+    text = str(value).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def get_summary_timestamp(item: Dict[str, Any]) -> datetime:
+    for key in ("UpdateDate", "updateDate", "updatedate", "CreateDate", "createDate", "createdate"):
+        parsed = parse_slingshot_timestamp(item.get(key))
+        if parsed:
+            return parsed
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def get_summary_file_id(item: Dict[str, Any]) -> Optional[int]:
+    file_id_raw = item.get("ID") or item.get("Id") or item.get("id")
+    if not file_id_raw:
+        return None
+    return int(file_id_raw)
+
+
+def get_summary_file_name(item: Dict[str, Any]) -> str:
+    file_id = item.get("ID") or item.get("Id") or item.get("id")
+    return item.get("Name") or item.get("name") or f"GRC_{file_id}.grc"
 
 
 def get_or_create_grower(conn, grower_name: str) -> int:
@@ -278,6 +351,8 @@ def find_storage_location(conn, destination_code: Optional[str]) -> Optional[int
     if not destination_code:
         return None
 
+    lookup_code = destination_to_bin_code(destination_code)
+
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -285,10 +360,27 @@ def find_storage_location(conn, destination_code: Optional[str]) -> Optional[int
             FROM Storage_Location
             WHERE Bin_Code = %s
             """,
-            (destination_code,)
+            (lookup_code,)
         )
         row = cur.fetchone()
-        return row["StorLoc_ID"] if row else None
+        if row:
+            return row["StorLoc_ID"]
+
+        cur.execute(
+            """
+            SELECT StorLoc_ID, Bin_Code, Bin_Name
+            FROM Storage_Location
+            """
+        )
+        destination_key = normalize_storage_lookup(lookup_code)
+        for row in cur.fetchall():
+            if destination_key in {
+                normalize_storage_lookup(row["Bin_Code"]),
+                normalize_storage_lookup(row["Bin_Name"]),
+            }:
+                return row["StorLoc_ID"]
+
+        return None
 
 
 
@@ -347,7 +439,9 @@ def insert_harvest_load(
     destination_code = normalize_destination(load_row.get("dest"))
 
     harvest_date = safe_date(load_row.get("date"))
-    mc = safe_decimal(load_row.get("comment"))
+    mc = safe_moisture(load_row.get("comment"))
+    if mc is None:
+        mc = safe_moisture(load_row.get("moisture"))
     gross_weight = safe_decimal(load_row.get("weight"))
     test_weight = safe_decimal(load_row.get("test_weight"))
     wet_bushels = safe_decimal(load_row.get("wet"))
@@ -457,28 +551,28 @@ def insert_harvest_load(
         if existing:
             cur.execute(
                 """
-                UPDATE harvest_backup1
+                UPDATE Harvest
                 SET
                     Cart_ID = %s,
                     Field_ID = %s,
                     Crop_ID = %s,
                     Dpt_ID = %s,
-                    StorLoc_ID = %s,
+                    StorLoc_ID = COALESCE(%s, StorLoc_ID),
                     Load_Num = %s,
                     Harvest_Date = %s,
-                    MC = %s,
-                    Gross_Weight = %s,
-                    Tare_Weight = %s,
-                    Bushels = %s,
-                    WetBushels = %s,
-                    DryBushels = %s,
+                    MC = COALESCE(%s, MC),
+                    Gross_Weight = COALESCE(%s, Gross_Weight),
+                    Tare_Weight = COALESCE(%s, Tare_Weight),
+                    Bushels = COALESCE(%s, Bushels),
+                    WetBushels = COALESCE(%s, WetBushels),
+                    DryBushels = COALESCE(%s, DryBushels),
                     JobNumber = %s,
-                    Note = %s,
-                    Truck_ID = %s,
-                    Destination = %s,
-                    Test_Weight = %s,
-                    Variety = %s,
-                    Load_Cell = %s,
+                    Note = COALESCE(%s, Note),
+                    Truck_ID = COALESCE(%s, Truck_ID),
+                    Destination = COALESCE(%s, Destination),
+                    Test_Weight = COALESCE(%s, Test_Weight),
+                    Variety = COALESCE(%s, Variety),
+                    Load_Cell = COALESCE(%s, Load_Cell),
                     Source_File_Name = %s,
                     Source_File_ID = %s,
                     External_Load_Key = %s,
@@ -491,7 +585,7 @@ def insert_harvest_load(
 
         cur.execute(
             """
-            INSERT INTO harvest_backup1 (
+            INSERT INTO Harvest (
                 Cart_ID,
                 Field_ID,
                 Crop_ID,
@@ -540,16 +634,17 @@ def import_all_graincart_files():
     error_count = 0
 
     try:
-        for item in client.iter_all_graincart_summaries(pagesize=25):
-            file_id_raw = item.get("ID") or item.get("Id") or item.get("id")
-            file_name = item.get("Name") or item.get("name") or f"GRC_{file_id_raw}.grc"
+        summary_items = list(client.iter_all_graincart_summaries(pagesize=25))
+        summary_items.sort(key=lambda item: (get_summary_file_name(item), get_summary_timestamp(item)))
 
-            if not file_id_raw:
+        for item in summary_items:
+            file_id = get_summary_file_id(item)
+            file_name = get_summary_file_name(item)
+
+            if file_id is None:
                 print("Skipping file with missing ID")
                 skipped_count += 1
                 continue
-
-            file_id = int(file_id_raw)
 
             try:
                 parsed = client.get_parsed_graincart_file(file_id, file_name=file_name)
@@ -562,6 +657,7 @@ def import_all_graincart_files():
                     continue
 
                 imported_this_file = 0
+                updated_this_file = 0
                 skipped_this_file = 0
 
                 for row_num, load_row in enumerate(loads, start=1):
@@ -577,6 +673,8 @@ def import_all_graincart_files():
                     if status == "IMPORTED":
                         imported_this_file += 1
                         load_count += 1
+                    elif status == "UPDATED":
+                        updated_this_file += 1
                     else:
                         skipped_this_file += 1
                         skipped_count += 1
@@ -586,7 +684,7 @@ def import_all_graincart_files():
                 file_count += 1
                 print(
                     f"{file_name} -> loads found: {len(loads)} | "
-                    f"imported={imported_this_file}, skipped={skipped_this_file}"
+                    f"imported={imported_this_file}, updated={updated_this_file}, skipped={skipped_this_file}"
                 )
 
             except Exception as exc:
@@ -611,9 +709,8 @@ def import_graincart_file_by_id(file_id: int):
     try:
         detail = client.get_graincart_detail(file_id)
         items = detail.get("GrainCart") or []
-        file_name = f"GRC_{file_id}.grc"
-        if items:
-            file_name = items[0].get("Name") or file_name
+        summary_item = items[0] if items else {"ID": file_id}
+        file_name = get_summary_file_name(summary_item)
 
         parsed = client.get_parsed_graincart_file(file_id, file_name=file_name)
         header = parsed["header"]
@@ -670,8 +767,21 @@ def import_graincart_files_by_ids(file_ids: Iterable[int]):
         print("No file IDs provided.")
         return
 
+    client = SlingshotClient()
+    summary_items = []
+    for file_id in unique_ids:
+        detail = client.get_graincart_detail(file_id)
+        items = detail.get("GrainCart") or []
+        summary_items.append(items[0] if items else {"ID": file_id})
+
+    summary_items.sort(key=lambda item: (get_summary_file_name(item), get_summary_timestamp(item)))
+
     print(f"Importing {total} specific Slingshot file(s)...")
-    for index, file_id in enumerate(unique_ids, start=1):
+    for index, item in enumerate(summary_items, start=1):
+        file_id = get_summary_file_id(item)
+        if file_id is None:
+            print(f"[{index}/{total}] Skipping file with missing ID")
+            continue
         print(f"[{index}/{total}] Importing file ID {file_id}")
         import_graincart_file_by_id(file_id)
 
