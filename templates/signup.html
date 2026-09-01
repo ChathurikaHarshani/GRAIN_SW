@@ -200,6 +200,14 @@
 
             <form method="post" class="mb-3">
               <div class="mb-3">
+                <label class="form-label fw-semibold">Grower</label>
+                <select name="grower_id" class="form-select" required>
+                  <option value="">Request access to...</option>
+                  {% for grower in growers %}<option value="{{ grower.Grower_ID }}">{{ grower.Grower_Name }}</option>{% endfor %}
+                </select>
+                <div class="form-text">A Grower administrator must approve your request.</div>
+              </div>
+              <div class="mb-3">
                 <label class="form-label fw-semibold">Username</label>
                 <input name="username" class="form-control" placeholder="Choose a username" required>
               </div>

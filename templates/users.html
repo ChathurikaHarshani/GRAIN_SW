@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}User access | GMS{% endblock %}
+{% block content %}
+<div class="container py-4"><h1>User access</h1><p class="text-muted">Manage access to {{ current_user.grower_name }}.</p>
+{% with messages = get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+<div class="table-responsive"><table class="table align-middle"><thead><tr><th>User</th><th>Requested</th><th>Role and status</th></tr></thead><tbody>
+{% for m in memberships %}<tr><td><strong>{{ m.full_name or m.username }}</strong><div class="text-muted small">{{ m.username }}</div></td><td>{{ m.created_at }}</td><td>
+<form method="post" class="d-flex gap-2"><input type="hidden" name="membership_id" value="{{ m.id }}">
+<select class="form-select" name="role" style="max-width:140px">{% for role in ['viewer','editor','admin'] %}<option value="{{ role }}" {% if m.role==role %}selected{% endif %}>{{ role|title }}</option>{% endfor %}</select>
+<select class="form-select" name="status" style="max-width:140px">{% for status in ['pending','active','rejected'] %}<option value="{{ status }}" {% if m.status==status %}selected{% endif %}>{{ status|title }}</option>{% endfor %}</select>
+<button class="btn btn-primary">Save</button></form></td></tr>{% endfor %}</tbody></table></div></div>
+{% endblock %}

@@ -118,6 +118,7 @@
               <li><hr class="dropdown-divider"></li>
               <li><a class="dropdown-item" href="{{ url_for('list_delivery_locations') }}">Delivery Locations</a></li>
               <li><a class="dropdown-item" href="{{ url_for('list_market_prices') }}">Market Prices</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('manage_users') }}">User Access</a></li>
             </ul>
           </li>
           {% endif %}
@@ -155,6 +156,7 @@
               <li>
                 <span class="dropdown-item-text text-muted">
                   Logged in as <strong>{{ current_user.username }}</strong>
+                  {% if current_user.grower_name %}<br>{{ current_user.grower_name }} · {{ current_user.grower_role|title }}{% endif %}
                 </span>
               </li>
               <li><hr class="dropdown-divider"></li>

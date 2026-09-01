@@ -327,11 +327,11 @@ def get_or_create_crop(conn, crop_name: str) -> int:
         return cur.lastrowid
 
 
-def get_or_create_cart(conn, cart_code: str) -> int:
+def get_or_create_cart(conn, cart_code: str, grower_id: int) -> int:
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT Cart_ID FROM Cart WHERE Cart_Code = %s",
-            (cart_code,)
+            "SELECT Cart_ID FROM Cart WHERE Cart_Code = %s AND Grower_ID = %s",
+            (cart_code, grower_id)
         )
         row = cur.fetchone()
         if row:
@@ -339,15 +339,15 @@ def get_or_create_cart(conn, cart_code: str) -> int:
 
         cur.execute(
             """
-            INSERT INTO Cart (Cart_Code, Cart_Name)
-            VALUES (%s, %s)
+            INSERT INTO Cart (Cart_Code, Cart_Name, Grower_ID)
+            VALUES (%s, %s, %s)
             """,
-            (cart_code, f"Cart {cart_code}")
+            (cart_code, f"Cart {cart_code}", grower_id)
         )
         return cur.lastrowid
 
 
-def find_storage_location(conn, destination_code: Optional[str]) -> Optional[int]:
+def find_storage_location(conn, destination_code: Optional[str], grower_id: int) -> Optional[int]:
     if not destination_code:
         return None
 
@@ -358,9 +358,9 @@ def find_storage_location(conn, destination_code: Optional[str]) -> Optional[int
             """
             SELECT StorLoc_ID
             FROM Storage_Location
-            WHERE Bin_Code = %s
+            WHERE Bin_Code = %s AND Grower_ID = %s
             """,
-            (lookup_code,)
+            (lookup_code, grower_id)
         )
         row = cur.fetchone()
         if row:
@@ -369,8 +369,8 @@ def find_storage_location(conn, destination_code: Optional[str]) -> Optional[int
         cur.execute(
             """
             SELECT StorLoc_ID, Bin_Code, Bin_Name
-            FROM Storage_Location
-            """
+            FROM Storage_Location WHERE Grower_ID = %s
+            """, (grower_id,)
         )
         destination_key = normalize_storage_lookup(lookup_code)
         for row in cur.fetchall():
@@ -480,8 +480,8 @@ def insert_harvest_load(
     dpt_id = get_or_create_department(conn, farm_name, grower_id)
     field_id = get_or_create_field(conn, field_name, crop_year, dpt_id)
     crop_id = get_or_create_crop(conn, crop_name)
-    cart_id = get_or_create_cart(conn, cart_code)
-    storloc_id = find_storage_location(conn, destination_code)
+    cart_id = get_or_create_cart(conn, cart_code, grower_id)
+    storloc_id = find_storage_location(conn, destination_code, grower_id)
 
     external_load_key = build_external_load_key(
         harvest_date=harvest_date,

@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request, redirect, url_for, session, abort,send_file
+from flask import Flask, render_template, jsonify, request, redirect, url_for, session, abort, send_file, flash
 from db import get_conn
 from datetime import date, timedelta
 from decimal import Decimal
@@ -19,6 +19,7 @@ import pandas as pd
 
 
 app = Flask(__name__)
+_access_schema_ready = False
 
 
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-change-me")
@@ -27,6 +28,14 @@ app.secret_key = os.getenv("SECRET_KEY", "dev-secret-change-me")
 def landing():
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
+    ensure_access_schema()
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM grower_memberships WHERE role='admin' AND status='active'")
+    needs_setup = cur.fetchone()[0] == 0
+    cur.close(); conn.close()
+    if needs_setup:
+        return redirect(url_for("first_run_setup"))
     return render_template("landing.html")
 
 
@@ -37,38 +46,139 @@ login_manager.login_view = "login"
 login_manager.init_app(app)
 
 
+@app.before_request
+def protect_pending_accounts():
+    if not current_user.is_authenticated:
+        return None
+    allowed = {"access_pending", "logout", "static"}
+    if current_user.membership_status != "active" and request.endpoint not in allowed:
+        return redirect(url_for("access_pending"))
+
+
+@app.context_processor
+def access_context():
+    return {
+        "can_edit": bool(current_user.is_authenticated and getattr(current_user, "can_edit", False)),
+    }
+
+
 class User(UserMixin):
-    def __init__(self, row):
+    def __init__(self, row, membership=None):
         self.id = row["id"]
         self.username = row["username"]
         self.role = row["role"]
         self.password_hash = row["password_hash"]
         self._active = bool(row.get("is_active", 1))
+        membership = membership or {}
+        self.grower_id = membership.get("Grower_ID")
+        self.grower_name = membership.get("Grower_Name")
+        self.grower_role = membership.get("membership_role")
+        self.membership_status = membership.get("membership_status")
 
     @property
     def is_admin(self):
-        return self.role == "admin"
+        return self.grower_role == "admin" and self.membership_status == "active"
 
+    @property
+    def can_edit(self):
+        return self.grower_role in ("editor", "admin") and self.membership_status == "active"
+
+    @property
     def is_active(self):
         return self._active
 
     
 
 
+def ensure_access_schema():
+    """Create the access-control tables and preserve access for existing installs."""
+    global _access_schema_ready
+    if _access_schema_ready:
+        return
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS grower_memberships (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          user_id BIGINT UNSIGNED NOT NULL,
+          Grower_ID BIGINT UNSIGNED NOT NULL,
+          role ENUM('viewer','editor','admin') NOT NULL DEFAULT 'viewer',
+          status ENUM('pending','active','rejected') NOT NULL DEFAULT 'pending',
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          approved_at TIMESTAMP NULL,
+          approved_by BIGINT UNSIGNED NULL,
+          PRIMARY KEY (id),
+          UNIQUE KEY uq_grower_membership (user_id, Grower_ID),
+          CONSTRAINT fk_membership_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+          CONSTRAINT fk_membership_grower FOREIGN KEY (Grower_ID) REFERENCES Grower(Grower_ID) ON DELETE CASCADE,
+          CONSTRAINT fk_membership_approver FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """)
+    # Tables without an existing Department/Field path need an explicit owner.
+    tenant_tables = ("Cart", "Storage_Location", "Delivery_Location", "MarketPriceMonthly", "Delivery")
+    for table_name in tenant_tables:
+        cur.execute("""SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s AND COLUMN_NAME='Grower_ID'""", (table_name,))
+        if not cur.fetchone()[0]:
+            cur.execute(f"ALTER TABLE `{table_name}` ADD COLUMN Grower_ID BIGINT UNSIGNED NULL")
+    # Backward-compatible migration: existing accounts were already trusted. Attach
+    # them to the first existing Grower; legacy admins become Grower admins.
+    cur.execute("SELECT COUNT(*) FROM grower_memberships")
+    membership_count = cur.fetchone()[0]
+    if membership_count == 0:
+        cur.execute("SELECT Grower_ID FROM Grower ORDER BY Grower_ID LIMIT 1")
+        grower = cur.fetchone()
+        if grower:
+            cur.execute("""
+                INSERT INTO grower_memberships (user_id, Grower_ID, role, status, approved_at)
+                SELECT id, %s, IF(role='admin','admin','editor'), 'active', NOW()
+                FROM users WHERE is_active=1
+            """, (grower[0],))
+    cur.execute("SELECT Grower_ID FROM Grower ORDER BY Grower_ID LIMIT 1")
+    first_grower = cur.fetchone()
+    if first_grower:
+        for table_name in tenant_tables:
+            cur.execute(f"UPDATE `{table_name}` SET Grower_ID=%s WHERE Grower_ID IS NULL", (first_grower[0],))
+    conn.commit()
+    cur.close()
+    conn.close()
+    _access_schema_ready = True
+
+
+def get_membership(user_id):
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("""
+        SELECT gm.Grower_ID, g.Grower_Name,
+               gm.role AS membership_role, gm.status AS membership_status
+        FROM grower_memberships gm
+        JOIN Grower g ON g.Grower_ID=gm.Grower_ID
+        WHERE gm.user_id=%s
+        ORDER BY (gm.status='active') DESC, gm.id
+        LIMIT 1
+    """, (user_id,))
+    membership = cur.fetchone()
+    cur.close()
+    conn.close()
+    return membership
+
+
 @login_manager.user_loader
 def load_user(user_id):
+    ensure_access_schema()
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
     cur.execute("SELECT * FROM users WHERE id=%s AND is_active=1", (user_id,))
     row = cur.fetchone()
     cur.close()
     conn.close()
-    return User(row) if row else None
+    return User(row, get_membership(user_id)) if row else None
 
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    ensure_access_schema()
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
 
@@ -89,8 +199,9 @@ def login():
         ):
             error = "Invalid username or password"
         else:
-            login_user(User(user_row))
-            return redirect(url_for("dashboard"))
+            user = User(user_row, get_membership(user_row["id"]))
+            login_user(user)
+            return redirect(url_for("dashboard") if user.membership_status == "active" else url_for("access_pending"))
 
     return render_template("login.html", error=error)
 
@@ -117,11 +228,83 @@ def admin_required(view):
     return wrapper
 
 
+def membership_required(view):
+    @wraps(view)
+    @login_required
+    def wrapper(*args, **kwargs):
+        if current_user.membership_status != "active" or not current_user.grower_id:
+            return redirect(url_for("access_pending"))
+        return view(*args, **kwargs)
+    return wrapper
+
+
+def editor_required(view):
+    @wraps(view)
+    @membership_required
+    def wrapper(*args, **kwargs):
+        if not current_user.can_edit:
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapper
+
+
+@app.route("/access-pending")
+@login_required
+def access_pending():
+    if current_user.membership_status == "active":
+        return redirect(url_for("dashboard"))
+    return render_template("access_pending.html")
+
+
+@app.route("/setup", methods=["GET", "POST"])
+def first_run_setup():
+    """Bootstrap the first Grower administrator on a truly empty install."""
+    ensure_access_schema()
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT COUNT(*) AS n FROM grower_memberships WHERE role='admin' AND status='active'")
+    if cur.fetchone()["n"]:
+        cur.close(); conn.close()
+        abort(404)
+    error = None
+    if request.method == "POST":
+        grower_name = request.form.get("grower_name", "").strip()
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        confirm = request.form.get("confirm_password", "")
+        if not grower_name or not username:
+            error = "Grower name and username are required."
+        elif password != confirm or len(password) < 8:
+            error = "Passwords must match and contain at least 8 characters."
+        else:
+            cur.execute("SELECT id FROM users WHERE username=%s", (username,))
+            if cur.fetchone():
+                error = "Username already exists."
+            else:
+                pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+                try:
+                    cur.execute("INSERT INTO Grower (Grower_Name) VALUES (%s)", (grower_name,))
+                    grower_id = cur.lastrowid
+                    cur.execute("INSERT INTO users (username,password_hash,role,is_active) VALUES (%s,%s,'admin',1)", (username, pw_hash))
+                    user_id = cur.lastrowid
+                    cur.execute("""INSERT INTO grower_memberships
+                        (user_id,Grower_ID,role,status,approved_at) VALUES (%s,%s,'admin','active',NOW())""", (user_id, grower_id))
+                    conn.commit()
+                    cur.close(); conn.close()
+                    return redirect(url_for("login"))
+                except Exception:
+                    conn.rollback()
+                    raise
+    cur.close(); conn.close()
+    return render_template("setup.html", error=error)
+
+
 
 
 
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
+    ensure_access_schema()
     # if already logged in, go to dashboard
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
@@ -131,9 +314,10 @@ def signup():
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         confirm  = request.form.get("confirm_password", "")
+        grower_id = request.form.get("grower_id", "").strip()
 
-        if not username:
-            error = "Username is required."
+        if not username or not grower_id:
+            error = "Username and Grower are required."
         elif password != confirm:
             error = "Passwords do not match."
         elif len(password) < 6:
@@ -156,6 +340,11 @@ def signup():
                     INSERT INTO users (username, password_hash, role, is_active)
                     VALUES (%s, %s, 'user', 1)
                 """, (username, pw_hash))
+                user_id = cur2.lastrowid
+                cur2.execute("""
+                    INSERT INTO grower_memberships (user_id, Grower_ID, role, status)
+                    VALUES (%s, %s, 'viewer', 'pending')
+                """, (user_id, int(grower_id)))
                 conn.commit()
                 cur2.close()
                 cur.close()
@@ -163,7 +352,47 @@ def signup():
 
                 return redirect(url_for("login"))
 
-    return render_template("signup.html", error=error)
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT Grower_ID, Grower_Name FROM Grower ORDER BY Grower_Name")
+    growers = cur.fetchall()
+    cur.close(); conn.close()
+    return render_template("signup.html", error=error, growers=growers)
+
+
+@app.route("/users", methods=["GET", "POST"])
+@admin_required
+def manage_users():
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    if request.method == "POST":
+        membership_id = request.form.get("membership_id", type=int)
+        role = request.form.get("role", "viewer")
+        status = request.form.get("status", "pending")
+        if role not in {"viewer", "editor", "admin"} or status not in {"pending", "active", "rejected"}:
+            abort(400)
+        cur.execute("SELECT user_id, role, status FROM grower_memberships WHERE id=%s AND Grower_ID=%s", (membership_id, current_user.grower_id))
+        existing = cur.fetchone()
+        if not existing:
+            abort(404)
+        if existing["user_id"] == int(current_user.id) and (role != "admin" or status != "active"):
+            flash("You cannot remove your own active administrator access.", "danger")
+        else:
+            cur.execute("""UPDATE grower_memberships SET role=%s,status=%s,
+                approved_at=IF(%s='active',NOW(),approved_at), approved_by=IF(%s='active',%s,approved_by)
+                WHERE id=%s AND Grower_ID=%s""",
+                (role, status, status, status, current_user.id, membership_id, current_user.grower_id))
+            conn.commit()
+            flash("User access updated.", "success")
+        return redirect(url_for("manage_users"))
+    cur.execute("""
+        SELECT gm.id, u.username, u.full_name, gm.role, gm.status, gm.created_at
+        FROM grower_memberships gm JOIN users u ON u.id=gm.user_id
+        WHERE gm.Grower_ID=%s ORDER BY (gm.status='pending') DESC, u.username
+    """, (current_user.grower_id,))
+    memberships = cur.fetchall()
+    cur.close(); conn.close()
+    return render_template("users.html", memberships=memberships)
 
 
 
@@ -214,9 +443,9 @@ def dashboard():
 
     cur.execute("""
         SELECT MAX(Crop_Year) AS crop_year
-        FROM Field
-        WHERE Crop_Year IS NOT NULL;
-    """)
+        FROM Field f JOIN Department d ON d.Dpt_ID=f.Dpt_ID
+        WHERE f.Crop_Year IS NOT NULL AND d.Grower_ID=%s;
+    """, (current_user.grower_id,))
     year_row = cur.fetchone() or {}
     dashboard_year = year_row.get("crop_year") or date.today().year
 
@@ -225,9 +454,9 @@ def dashboard():
                COUNT(*) AS load_count
         FROM Harvest h
         JOIN Crop c ON h.Crop_ID = c.Crop_ID
-        JOIN Field f ON h.Field_ID = f.Field_ID
-        WHERE f.Crop_Year = %s;
-    """, (dashboard_year,))
+        JOIN Field f ON h.Field_ID = f.Field_ID JOIN Department d ON d.Dpt_ID=f.Dpt_ID
+        WHERE f.Crop_Year = %s AND d.Grower_ID=%s;
+    """, (dashboard_year, current_user.grower_id))
     harvest_totals = cur.fetchone() or {}
 
     cur.execute("""
@@ -236,16 +465,16 @@ def dashboard():
         JOIN Department d ON d.Grower_ID = g.Grower_ID
         JOIN Field f ON f.Dpt_ID = d.Dpt_ID
         JOIN Harvest h ON h.Field_ID = f.Field_ID
-        WHERE f.Crop_Year = %s;
-    """, (dashboard_year,))
+        WHERE f.Crop_Year = %s AND g.Grower_ID=%s;
+    """, (dashboard_year, current_user.grower_id))
     grower_totals = cur.fetchone() or {}
 
     cur.execute("""
         SELECT COUNT(*) AS user_count,
-               SUM(CASE WHEN role = 'admin' THEN 1 ELSE 0 END) AS admin_count
-        FROM users
-        WHERE is_active = 1;
-    """)
+               SUM(CASE WHEN gm.role = 'admin' THEN 1 ELSE 0 END) AS admin_count
+        FROM users u JOIN grower_memberships gm ON gm.user_id=u.id
+        WHERE u.is_active = 1 AND gm.status='active' AND gm.Grower_ID=%s;
+    """, (current_user.grower_id,))
     user_totals = cur.fetchone() or {}
 
     cur.execute(f"""
@@ -254,10 +483,10 @@ def dashboard():
             COALESCE(SUM(COALESCE({delivery_bu_sql}, 0)), 0) AS bushels
         FROM Delivery d
         JOIN Crop c ON d.Crop_ID = c.Crop_ID
-        WHERE YEAR(d.Delivery_Date) = %s
+        WHERE YEAR(d.Delivery_Date) = %s AND d.Grower_ID=%s
         GROUP BY MONTH(d.Delivery_Date)
         ORDER BY MONTH(d.Delivery_Date);
-    """, (dashboard_year,))
+    """, (dashboard_year, current_user.grower_id))
     monthly_rows = cur.fetchall()
 
     cur.execute(f"""
@@ -265,8 +494,8 @@ def dashboard():
                COUNT(*) AS delivery_count
         FROM Delivery d
         JOIN Crop c ON d.Crop_ID = c.Crop_ID
-        WHERE YEAR(d.Delivery_Date) = %s;
-    """, (dashboard_year,))
+        WHERE YEAR(d.Delivery_Date) = %s AND d.Grower_ID=%s;
+    """, (dashboard_year, current_user.grower_id))
     delivery_totals = cur.fetchone() or {}
 
     cur.close()
@@ -361,7 +590,7 @@ def list_growers():
     """Show all growers in a table."""
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
-    cur.execute("SELECT Grower_ID, Grower_Name FROM Grower ORDER BY Grower_Name;")
+    cur.execute("SELECT Grower_ID, Grower_Name FROM Grower WHERE Grower_ID=%s", (current_user.grower_id,))
     growers = cur.fetchall()
     cur.close()
     conn.close()
@@ -372,6 +601,7 @@ def list_growers():
 @admin_required
 def new_grower():
     """Form to add a new grower."""
+    abort(403)
     if request.method == "POST":
         grower_name = request.form.get("grower_name", "").strip()
 
@@ -408,8 +638,8 @@ def list_departments():
                g.Grower_Name
         FROM Department d
         JOIN Grower g ON d.Grower_ID = g.Grower_ID
-        ORDER BY d.Dpt_Name;
-    """)
+        WHERE d.Grower_ID=%s ORDER BY d.Dpt_Name;
+    """, (current_user.grower_id,))
     departments = cur.fetchall()
     cur.close()
     conn.close()
@@ -424,7 +654,7 @@ def new_department():
 
     # Fetch growers for the dropdown
     cur = conn.cursor(dictionary=True)
-    cur.execute("SELECT Grower_ID, Grower_Name FROM Grower ORDER BY Grower_Name;")
+    cur.execute("SELECT Grower_ID, Grower_Name FROM Grower WHERE Grower_ID=%s", (current_user.grower_id,))
     growers = cur.fetchall()
     cur.close()
 
@@ -432,7 +662,7 @@ def new_department():
         dpt_name = request.form.get("dpt_name", "").strip()
         contact = request.form.get("contact", "").strip()
         manager = request.form.get("manager", "").strip()
-        grower_id = request.form.get("grower_id")
+        grower_id = current_user.grower_id
 
         if dpt_name and contact and manager and grower_id:
             cur = conn.cursor()
@@ -468,8 +698,8 @@ def list_fields():
                d.Dpt_Name
         FROM Field f
         JOIN Department d ON f.Dpt_ID = d.Dpt_ID
-        ORDER BY f.Field_Name;
-    """)
+        WHERE d.Grower_ID=%s ORDER BY f.Field_Name;
+    """, (current_user.grower_id,))
     fields = cur.fetchall()
     cur.close()
     conn.close()
@@ -481,7 +711,7 @@ def new_field():
     conn = get_conn()
 
     cur = conn.cursor(dictionary=True)
-    cur.execute("SELECT Dpt_ID, Dpt_Name FROM Department ORDER BY Dpt_Name;")
+    cur.execute("SELECT Dpt_ID, Dpt_Name FROM Department WHERE Grower_ID=%s ORDER BY Dpt_Name;", (current_user.grower_id,))
     departments = cur.fetchall()
     cur.close()
 
@@ -495,6 +725,13 @@ def new_field():
         dpt_id = request.form.get("dpt_id", "").strip()
 
         if field_name and crop_year and dpt_id:
+            check = conn.cursor()
+            check.execute("SELECT 1 FROM Department WHERE Dpt_ID=%s AND Grower_ID=%s", (dpt_id, current_user.grower_id))
+            allowed_department = check.fetchone()
+            check.close()
+            if not allowed_department:
+                conn.close()
+                abort(400)
             cur = conn.cursor()
             cur.execute("""
                 INSERT INTO Field (Field_Name, Acres, Crop_Year, Irr_Type, Hybrid_Variety, Note, Dpt_ID)
@@ -527,7 +764,7 @@ def new_field():
 def list_carts():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
-    cur.execute("SELECT Cart_ID, Cart_Code, Cart_Name FROM Cart ORDER BY Cart_Name;")
+    cur.execute("SELECT Cart_ID, Cart_Code, Cart_Name FROM Cart WHERE Grower_ID=%s ORDER BY Cart_Name;", (current_user.grower_id,))
     carts = cur.fetchall()
     cur.close()
     conn.close()
@@ -544,8 +781,8 @@ def new_cart():
             conn = get_conn()
             cur = conn.cursor()
             cur.execute(
-                "INSERT INTO Cart (Cart_Code, Cart_Name) VALUES (%s, %s);",
-                (cart_code, cart_name)
+                "INSERT INTO Cart (Cart_Code, Cart_Name, Grower_ID) VALUES (%s, %s, %s);",
+                (cart_code, cart_name, current_user.grower_id)
             )
             conn.commit()
             cur.close()
@@ -611,9 +848,8 @@ def list_storage():
     cur.execute("""
         SELECT StorLoc_ID, Bin_Code, Bin_Name, Bin_Capacity, Diameter, Install_Date,
                Legal_Desc, Lattitude, Lontitude, Manufacture
-        FROM Storage_Location
-        ORDER BY Bin_Name;
-    """)
+        FROM Storage_Location WHERE Grower_ID=%s ORDER BY Bin_Name;
+    """, (current_user.grower_id,))
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -640,10 +876,10 @@ def new_storage():
             cur.execute("""
                 INSERT INTO Storage_Location
                   (Bin_Code, Bin_Name, Bin_Capacity, Diameter, Install_Date,
-                   Legal_Desc, Lattitude, Lontitude, Manufacture)
+                   Legal_Desc, Lattitude, Lontitude, Manufacture, Grower_ID)
                 VALUES
                   (%s, %s, %s, %s, %s,
-                   %s, %s, %s, %s);
+                   %s, %s, %s, %s, %s);
             """, (
                 bin_code,
                 bin_name,
@@ -653,7 +889,8 @@ def new_storage():
                 legal_desc if legal_desc else None,
                 float(lattitude) if lattitude else None,
                 float(lontitude) if lontitude else None,
-                manufacture if manufacture else None
+                manufacture if manufacture else None,
+                current_user.grower_id
             ))
             conn.commit()
             cur.close()
@@ -674,9 +911,8 @@ def list_delivery_locations():
     cur = conn.cursor(dictionary=True)
     cur.execute("""
         SELECT DelLoc_ID, DelLoc_code, Location
-        FROM Delivery_Location
-        ORDER BY DelLoc_code;
-    """)
+        FROM Delivery_Location WHERE Grower_ID=%s ORDER BY DelLoc_code;
+    """, (current_user.grower_id,))
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -693,9 +929,9 @@ def new_delivery_location():
             conn = get_conn()
             cur = conn.cursor()
             cur.execute("""
-                INSERT INTO Delivery_Location (DelLoc_code, Location)
-                VALUES (%s, %s);
-            """, (code, location if location else None))
+                INSERT INTO Delivery_Location (DelLoc_code, Location, Grower_ID)
+                VALUES (%s, %s, %s);
+            """, (code, location if location else None, current_user.grower_id))
             conn.commit()
             cur.close()
             conn.close()
@@ -718,8 +954,8 @@ def list_market_prices():
         SELECT mp.ID, mp.Crop, c.Crop_Name, mp.Year, mp.Month, mp.Day, mp.Market_Price
         FROM MarketPriceMonthly mp
         LEFT JOIN Crop c ON mp.Crop = c.Crop_ID
-        ORDER BY mp.Year DESC, mp.Month DESC, mp.ID DESC;
-    """)
+        WHERE mp.Grower_ID=%s ORDER BY mp.Year DESC, mp.Month DESC, mp.ID DESC;
+    """, (current_user.grower_id,))
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -746,9 +982,9 @@ def new_market_price():
         if crop_id and year and month and day and price:
             cur = conn.cursor()
             cur.execute("""
-                INSERT INTO MarketPriceMonthly (Crop, Year, Month, Day, Market_Price)
-                VALUES (%s, %s, %s, %s, %s);
-            """, (int(crop_id), int(year), int(month), day, float(price)))
+                INSERT INTO MarketPriceMonthly (Crop, Year, Month, Day, Market_Price, Grower_ID)
+                VALUES (%s, %s, %s, %s, %s, %s);
+            """, (int(crop_id), int(year), int(month), day, float(price), current_user.grower_id))
             conn.commit()
             cur.close()
             conn.close()
@@ -939,6 +1175,8 @@ def new_market_price():
 @app.route("/harvest-query", methods=["GET", "POST"])
 @login_required
 def harvest_query():
+    if request.method == "POST" and not current_user.can_edit:
+        abort(403)
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
 
@@ -950,8 +1188,8 @@ def harvest_query():
     selected_edit_id = request.args.get("edit_id", "").strip()
 
     # ---------------- Dropdown data ----------------
-    field_filter_where = []
-    field_filter_params = []
+    field_filter_where = ["d.Grower_ID = %s"]
+    field_filter_params = [current_user.grower_id]
 
     if selected_year:
         field_filter_where.append("f.Crop_Year = %s")
@@ -966,6 +1204,7 @@ def harvest_query():
             f.Crop_Year
         FROM Harvest h
         JOIN Field f ON h.Field_ID = f.Field_ID
+        JOIN Department d ON d.Dpt_ID=f.Dpt_ID
         {field_filter_sql}
         ORDER BY f.Field_Name, f.Crop_Year DESC, f.Field_ID;
     """.format(field_filter_sql=field_filter_sql), tuple(field_filter_params))
@@ -976,31 +1215,32 @@ def harvest_query():
         if not selected_field_matches_year:
             selected_field_id = ""
 
-    cur.execute("SELECT StorLoc_ID, Bin_Name FROM Storage_Location ORDER BY Bin_Name;")
+    cur.execute("SELECT StorLoc_ID, Bin_Name FROM Storage_Location WHERE Grower_ID=%s ORDER BY Bin_Name;", (current_user.grower_id,))
     storages = cur.fetchall()
 
 
 
     cur.execute("""
     SELECT Field_ID, Field_Name, Crop_Year
-    FROM Field
+    FROM Field f JOIN Department d ON d.Dpt_ID=f.Dpt_ID
+    WHERE d.Grower_ID=%s
     ORDER BY Field_Name, Crop_Year DESC;
-    """)
+    """, (current_user.grower_id,))
     entry_fields = cur.fetchall()
 
     # Distinct years for filter dropdown
     cur.execute("""
         SELECT DISTINCT Crop_Year
-        FROM Field
-        WHERE Crop_Year IS NOT NULL
+        FROM Field f JOIN Department d ON d.Dpt_ID=f.Dpt_ID
+        WHERE Crop_Year IS NOT NULL AND d.Grower_ID=%s
         ORDER BY Crop_Year DESC;
-    """)
+    """, (current_user.grower_id,))
     years = cur.fetchall()
 
     cur.execute("SELECT Crop_ID, Crop_Name, Weight_PerBushel FROM Crop ORDER BY Crop_Name;")
     crops = cur.fetchall()
 
-    cur.execute("SELECT Cart_ID, Cart_Name FROM Cart ORDER BY Cart_Name;")
+    cur.execute("SELECT Cart_ID, Cart_Name FROM Cart WHERE Grower_ID=%s ORDER BY Cart_Name;", (current_user.grower_id,))
     carts = cur.fetchall()
 
     error = None
@@ -1020,9 +1260,9 @@ def harvest_query():
               Gross_Weight,
               Tare_Weight,
               Note
-            FROM Harvest
-            WHERE Harvest_ID = %s;
-        """, (selected_edit_id,))
+            FROM Harvest h JOIN Field f ON f.Field_ID=h.Field_ID JOIN Department d ON d.Dpt_ID=f.Dpt_ID
+            WHERE Harvest_ID = %s AND d.Grower_ID=%s;
+        """, (selected_edit_id, current_user.grower_id))
         edit_load = cur.fetchone()
         if not edit_load:
             selected_edit_id = ""
@@ -1047,12 +1287,21 @@ def harvest_query():
         elif not harvest_id and not storloc_id:
             error = "Storage is required for new loads."
         else:
-            cur.execute("SELECT Dpt_ID FROM Field WHERE Field_ID=%s;", (field_id,))
+            cur.execute("""SELECT f.Dpt_ID FROM Field f JOIN Department d ON d.Dpt_ID=f.Dpt_ID
+                WHERE f.Field_ID=%s AND d.Grower_ID=%s""", (field_id, current_user.grower_id))
             row = cur.fetchone()
             if not row:
                 error = "Selected Field not found."
             else:
                 dpt_id = row["Dpt_ID"]
+
+                cur.execute("SELECT Cart_ID FROM Cart WHERE Cart_ID=%s AND Grower_ID=%s", (cart_id, current_user.grower_id))
+                if not cur.fetchone():
+                    abort(400)
+                if storloc_id:
+                    cur.execute("SELECT StorLoc_ID FROM Storage_Location WHERE StorLoc_ID=%s AND Grower_ID=%s", (storloc_id, current_user.grower_id))
+                    if not cur.fetchone():
+                        abort(400)
 
                 cur.execute("SELECT Weight_PerBushel, Base_MC FROM Crop WHERE Crop_ID=%s;", (crop_id,))
                 crop_row = cur.fetchone()
@@ -1087,11 +1336,13 @@ def harvest_query():
                             Tare_Weight = %s,
                             Bushels = %s,
                             Note = %s
-                        WHERE Harvest_ID = %s;
+                        WHERE Harvest_ID = %s AND Field_ID IN (
+                          SELECT f.Field_ID FROM Field f JOIN Department d ON d.Dpt_ID=f.Dpt_ID WHERE d.Grower_ID=%s
+                        );
                     """, (
                         int(cart_id), int(field_id), int(crop_id), int(dpt_id), storloc_val,
                         load_num, harvest_date, mc_val, gross_val, tare_val, bushels_val,
-                        (note if note else None), int(harvest_id)
+                        (note if note else None), int(harvest_id), current_user.grower_id
                     ))
                 else:
                     cur2.execute("""
@@ -1117,8 +1368,8 @@ def harvest_query():
                 ))
 
     # ---------------- GET: show filtered loads ----------------
-    where = []
-    params = []
+    where = ["d.Grower_ID = %s"]
+    params = [current_user.grower_id]
 
     if selected_field_id:
         where.append("h.Field_ID = %s")
@@ -1156,6 +1407,7 @@ def harvest_query():
           h.Note
         FROM Harvest h
         JOIN Field f ON h.Field_ID = f.Field_ID
+        JOIN Department d ON d.Dpt_ID=f.Dpt_ID
         JOIN Crop cr ON h.Crop_ID = cr.Crop_ID
         LEFT JOIN Storage_Location s ON h.StorLoc_ID = s.StorLoc_ID
         {where_sql}
@@ -1231,8 +1483,8 @@ def harvest_summary():
     selected_storage = request.args.get("storloc_id", "").strip()
     selected_year = request.args.get("crop_year", "").strip()
 
-    where = []
-    params = []
+    where = ["d.Grower_ID = %s"]
+    params = [current_user.grower_id]
 
     if selected_field_id:
         where.append("h.Field_ID = %s")
@@ -1274,6 +1526,7 @@ def harvest_summary():
           AVG(h.MC) AS avg_mc
         FROM Harvest h
         JOIN Field f ON h.Field_ID = f.Field_ID
+        JOIN Department d ON d.Dpt_ID=f.Dpt_ID
         JOIN Crop c ON h.Crop_ID = c.Crop_ID
         {where_sql}
         GROUP BY f.Field_ID, f.Field_Name, f.Acres, f.Crop_Year
@@ -1319,7 +1572,9 @@ def pace():
     harvest_bu_sql = calculated_bushels_sql("h", "c")
 
     # Optional: earliest harvest date (like "1st Harvest Date" in Excel)
-    cur.execute("SELECT MIN(Harvest_Date) AS first_date FROM Harvest;")
+    cur.execute("""SELECT MIN(h.Harvest_Date) AS first_date FROM Harvest h
+        JOIN Field f ON f.Field_ID=h.Field_ID JOIN Department d ON d.Dpt_ID=f.Dpt_ID
+        WHERE d.Grower_ID=%s""", (current_user.grower_id,))
     first_date = cur.fetchone()["first_date"]
 
     # Build a date window (Excel shows lots of days; we can default to 60 days)
@@ -1372,10 +1627,11 @@ def pace():
           ) AS Milo
         FROM Harvest h
         JOIN Crop c ON h.Crop_ID = c.Crop_ID
-        WHERE h.Harvest_Date BETWEEN %s AND %s
+        JOIN Field f ON f.Field_ID=h.Field_ID JOIN Department d ON d.Dpt_ID=f.Dpt_ID
+        WHERE h.Harvest_Date BETWEEN %s AND %s AND d.Grower_ID=%s
         GROUP BY h.Harvest_Date
         ORDER BY h.Harvest_Date;
-    """, (start_date, end_date))
+    """, (start_date, end_date, current_user.grower_id))
 
     rows = cur.fetchall()
     cur.close()
@@ -1438,8 +1694,8 @@ def build_reconcile_context(start_date, end_date, crop_id=""):
 
     crop_filter_sql_h = ""
     crop_filter_sql_d = ""
-    params_h = [start_date, end_date]
-    params_d = [start_date, end_date]
+    params_h = [start_date, end_date, current_user.grower_id]
+    params_d = [start_date, end_date, current_user.grower_id]
 
     if crop_id:
         crop_filter_sql_h = " AND h.Crop_ID = %s "
@@ -1455,7 +1711,8 @@ def build_reconcile_context(start_date, end_date, crop_id=""):
           SUM(COALESCE({harvest_bu_sql},0)) AS harvest_bushels
         FROM Harvest h
         JOIN Crop c ON h.Crop_ID = c.Crop_ID
-        WHERE h.Harvest_Date BETWEEN %s AND %s
+        JOIN Field f ON f.Field_ID=h.Field_ID JOIN Department dept ON dept.Dpt_ID=f.Dpt_ID
+        WHERE h.Harvest_Date BETWEEN %s AND %s AND dept.Grower_ID=%s
         {crop_filter_sql_h}
     """, tuple(params_h))
     harvest_sum = cur.fetchone() or {}
@@ -1471,7 +1728,7 @@ def build_reconcile_context(start_date, end_date, crop_id=""):
           SUM(COALESCE(d.Gross_Sale,0) - COALESCE(d.Sale_Discounts,0)) AS delivery_net_sale
         FROM Delivery d
         JOIN Crop c ON d.Crop_ID = c.Crop_ID
-        WHERE d.Delivery_Date BETWEEN %s AND %s
+        WHERE d.Delivery_Date BETWEEN %s AND %s AND d.Grower_ID=%s
         {crop_filter_sql_d}
     """, tuple(params_d))
     delivery_sum = cur.fetchone() or {}
@@ -1498,7 +1755,8 @@ def build_reconcile_context(start_date, end_date, crop_id=""):
             SUM(COALESCE({harvest_bu_sql},0)) AS harvest_bushels
           FROM Harvest h
           JOIN Crop c ON h.Crop_ID = c.Crop_ID
-          WHERE h.Harvest_Date BETWEEN %s AND %s
+          JOIN Field f ON f.Field_ID=h.Field_ID JOIN Department dept ON dept.Dpt_ID=f.Dpt_ID
+          WHERE h.Harvest_Date BETWEEN %s AND %s AND dept.Grower_ID=%s
           {crop_filter_sql_h}
           GROUP BY h.Crop_ID
         ) hv
@@ -1510,7 +1768,7 @@ def build_reconcile_context(start_date, end_date, crop_id=""):
             SUM(COALESCE({delivery_bu_sql},0)) AS delivery_bushels
           FROM Delivery d
           JOIN Crop c ON d.Crop_ID = c.Crop_ID
-          WHERE d.Delivery_Date BETWEEN %s AND %s
+          WHERE d.Delivery_Date BETWEEN %s AND %s AND d.Grower_ID=%s
           {crop_filter_sql_d}
           GROUP BY d.Crop_ID
         ) dv ON hv.Crop_ID = dv.Crop_ID
@@ -1530,7 +1788,7 @@ def build_reconcile_context(start_date, end_date, crop_id=""):
             SUM(COALESCE({delivery_bu_sql},0)) AS delivery_bushels
           FROM Delivery d
           JOIN Crop c ON d.Crop_ID = c.Crop_ID
-          WHERE d.Delivery_Date BETWEEN %s AND %s
+          WHERE d.Delivery_Date BETWEEN %s AND %s AND d.Grower_ID=%s
           {crop_filter_sql_d}
           GROUP BY d.Crop_ID
         ) dv
@@ -1542,7 +1800,8 @@ def build_reconcile_context(start_date, end_date, crop_id=""):
             SUM(COALESCE({harvest_bu_sql},0)) AS harvest_bushels
           FROM Harvest h
           JOIN Crop c ON h.Crop_ID = c.Crop_ID
-          WHERE h.Harvest_Date BETWEEN %s AND %s
+          JOIN Field f ON f.Field_ID=h.Field_ID JOIN Department dept ON dept.Dpt_ID=f.Dpt_ID
+          WHERE h.Harvest_Date BETWEEN %s AND %s AND dept.Grower_ID=%s
           {crop_filter_sql_h}
           GROUP BY h.Crop_ID
         ) hv ON hv.Crop_ID = dv.Crop_ID
@@ -1580,11 +1839,12 @@ def build_reconcile_context(start_date, end_date, crop_id=""):
             (COALESCE(d.Gross_Sale,0) - COALESCE(d.Sale_Discounts,0)) AS net_sale
           FROM Harvest h
           JOIN Field f ON h.Field_ID = f.Field_ID
+          JOIN Department dept ON dept.Dpt_ID=f.Dpt_ID
           JOIN Crop c ON h.Crop_ID = c.Crop_ID
           LEFT JOIN Storage_Location sl ON h.StorLoc_ID = sl.StorLoc_ID
-          LEFT JOIN Delivery d ON CAST(d.Ticket_Num AS CHAR) = h.Load_Num
+          LEFT JOIN Delivery d ON CAST(d.Ticket_Num AS CHAR) = h.Load_Num AND d.Grower_ID=dept.Grower_ID
           LEFT JOIN Delivery_Location dl ON d.DelLoc_ID = dl.DelLoc_ID
-          WHERE h.Harvest_Date BETWEEN %s AND %s
+          WHERE h.Harvest_Date BETWEEN %s AND %s AND dept.Grower_ID=%s
           {crop_filter_sql_h}
         )
         UNION
@@ -1613,7 +1873,7 @@ def build_reconcile_context(start_date, end_date, crop_id=""):
           JOIN Crop c ON d.Crop_ID = c.Crop_ID
           LEFT JOIN Delivery_Location dl ON d.DelLoc_ID = dl.DelLoc_ID
           LEFT JOIN Harvest h ON h.Load_Num = CAST(d.Ticket_Num AS CHAR)
-          WHERE d.Delivery_Date BETWEEN %s AND %s
+          WHERE d.Delivery_Date BETWEEN %s AND %s AND d.Grower_ID=%s
           {crop_filter_sql_d}
             AND h.Harvest_ID IS NULL
         )
@@ -1684,9 +1944,9 @@ def build_inventory_snapshot(crop_year="", crop_name=""):
         LEFT JOIN Harvest h ON h.StorLoc_ID = s.StorLoc_ID
         LEFT JOIN Crop c ON c.Crop_ID = h.Crop_ID
         LEFT JOIN Field fi ON fi.Field_ID = h.Field_ID
-        WHERE 1=1
+        WHERE s.Grower_ID=%s
     """
-    params = []
+    params = [current_user.grower_id]
 
     if crop_year:
         harvest_q += " AND fi.Crop_Year = %s"
@@ -1712,9 +1972,9 @@ def build_inventory_snapshot(crop_year="", crop_name=""):
         FROM Storage_Location s
         LEFT JOIN Delivery d ON d.StorLoc_ID = s.StorLoc_ID
         LEFT JOIN Crop c ON c.Crop_ID = d.Crop_ID
-        WHERE 1=1
+        WHERE s.Grower_ID=%s AND (d.Grower_ID=%s OR d.Delivery_ID IS NULL)
     """
-    delivery_params = []
+    delivery_params = [current_user.grower_id, current_user.grower_id]
 
     if crop_name:
         delivery_q += " AND c.Crop_Name LIKE %s"
@@ -1803,7 +2063,7 @@ def billing():
     delivery_bu_sql = calculated_bushels_sql("d", "c")
 
     # Dropdown options
-    cur.execute("SELECT DelLoc_ID, DelLoc_code, Location FROM Delivery_Location ORDER BY DelLoc_code;")
+    cur.execute("SELECT DelLoc_ID, DelLoc_code, Location FROM Delivery_Location WHERE Grower_ID=%s ORDER BY DelLoc_code;", (current_user.grower_id,))
     locations = cur.fetchall()
 
     cur.execute("SELECT Crop_ID, Crop_Code, Crop_Name FROM Crop ORDER BY Crop_Code;")
@@ -1867,11 +2127,11 @@ def billing():
         JOIN Crop c ON d.Crop_ID = c.Crop_ID
         JOIN Delivery_Location dl ON d.DelLoc_ID = dl.DelLoc_ID
         LEFT JOIN Storage_Location sl ON d.StorLoc_ID = sl.StorLoc_ID
-        WHERE d.Delivery_Date BETWEEN %s AND %s
+        WHERE d.Delivery_Date BETWEEN %s AND %s AND d.Grower_ID=%s
           AND (%s IS NULL OR d.DelLoc_ID = %s)
           AND (%s IS NULL OR d.Crop_ID = %s)
         ORDER BY d.Delivery_Date, d.Ticket_Num;
-    """, (start_date, end_date, del_loc_id, del_loc_id, crop_id, crop_id))
+    """, (start_date, end_date, current_user.grower_id, del_loc_id, del_loc_id, crop_id, crop_id))
 
     rows = cur.fetchall()
 
@@ -1988,10 +2248,10 @@ def yield_report():
         JOIN Grower g       ON d.Grower_ID = g.Grower_ID
         JOIN Crop c         ON h.Crop_ID = c.Crop_ID
 
-        WHERE 1=1
+        WHERE g.Grower_ID=%s
     """
 
-    params = []
+    params = [current_user.grower_id]
 
     # Apply filters
     if crop_year:
@@ -2076,10 +2336,10 @@ def yield_export():
         JOIN Grower g       ON d.Grower_ID = g.Grower_ID
         JOIN Crop c         ON h.Crop_ID = c.Crop_ID
 
-        WHERE 1=1
+        WHERE g.Grower_ID=%s
     """
 
-    params = []
+    params = [current_user.grower_id]
 
     if crop_year:
         query += " AND fi.Crop_Year = %s"
@@ -2202,7 +2462,10 @@ def inventory_export():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(
+        host=os.getenv("FLASK_RUN_HOST", "127.0.0.1"),
+        port=int(os.getenv("FLASK_RUN_PORT", "5000")),
+    )
 
 # @app.route("/slingshot/jobdata")
 # def slingshot_jobdata():

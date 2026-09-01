@@ -65,6 +65,7 @@
   <hr class="my-4">
 
   <!-- Add or edit load -->
+  {% if can_edit %}
   <h4 class="mb-3" id="harvest-load-form">
     {% if edit_load %}Edit Harvest Load{% else %}Add Harvest Load{% endif %}
   </h4>
@@ -177,6 +178,9 @@
       {% endif %}
     </div>
   </form>
+  {% else %}
+  <div class="alert alert-info">You have Viewer access. Harvest loads are read-only.</div>
+  {% endif %}
 
   <hr class="my-4">
 
@@ -199,7 +203,7 @@
             <th>Storage</th>
             <th>Bushels</th>
             <th>Note</th>
-            <th>Edit</th>
+            {% if can_edit %}<th>Edit</th>{% endif %}
           </tr>
         </thead>
         <tbody>
@@ -216,13 +220,13 @@
             <td>{{ r.Storage }}</td>
             <td>{{ "{:,.1f}".format(r.Calculated_Bushels) if r.Calculated_Bushels is not none else "-" }}</td>
             <td>{{ r.Note if r.Note else "-" }}</td>
-            <td>
+            {% if can_edit %}<td>
               <a
                 class="btn btn-sm btn-outline-primary"
                 href="{{ url_for('harvest_query', field_id=selected_field_id, field_name=selected_field, storloc_id=selected_storage, crop_year=selected_year, edit_id=r.Harvest_ID, _anchor='harvest-load-form') }}">
                 Edit
               </a>
-            </td>
+            </td>{% endif %}
           </tr>
           {% endfor %}
         </tbody>

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Access pending | GMS{% endblock %}
+{% block content %}
+<div class="container py-5 text-center" style="max-width:680px">
+  <h1>Access pending</h1>
+  <p class="lead">Your account is ready, but a Grower administrator must approve it before you can view farm data.</p>
+  {% if current_user.grower_name %}<p>Requested Grower: <strong>{{ current_user.grower_name }}</strong></p>{% endif %}
+  <a class="btn btn-outline-secondary" href="{{ url_for('logout') }}">Sign out</a>
+</div>
+{% endblock %}
