@@ -19,6 +19,7 @@
           <th>ID</th>
           <th>Code</th>
           <th>Location</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -27,6 +28,7 @@
           <td>{{ l.DelLoc_ID }}</td>
           <td>{{ l.DelLoc_code }}</td>
           <td>{{ l.Location }}</td>
+          <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('edit_delivery_location', location_id=l.DelLoc_ID) }}">Edit</a></td>
         </tr>
       {% endfor %}
       </tbody>

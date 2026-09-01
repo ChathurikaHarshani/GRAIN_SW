@@ -624,6 +624,26 @@ def new_grower():
     return render_template("grower_form.html", error=None)
 
 
+@app.route("/growers/<int:grower_id>/edit", methods=["GET", "POST"])
+@admin_required
+def edit_grower(grower_id):
+    if grower_id != int(current_user.grower_id):
+        abort(404)
+    conn = get_conn(); cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT Grower_ID, Grower_Name FROM Grower WHERE Grower_ID=%s", (grower_id,))
+    grower = cur.fetchone()
+    if not grower: abort(404)
+    error = None
+    if request.method == "POST":
+        name = request.form.get("grower_name", "").strip()
+        if name:
+            cur.execute("UPDATE Grower SET Grower_Name=%s WHERE Grower_ID=%s", (name, grower_id)); conn.commit()
+            cur.close(); conn.close(); return redirect(url_for("list_growers"))
+        error = "Grower name is required."
+    cur.close(); conn.close()
+    return render_template("grower_form.html", grower=grower, error=error)
+
+
 
 # ----------------- Department: list + create ----------------- #
 
@@ -683,6 +703,24 @@ def new_department():
 
     conn.close()
     return render_template("department_form.html", growers=growers, error=None)
+
+
+@app.route("/departments/<int:dpt_id>/edit", methods=["GET", "POST"])
+@admin_required
+def edit_department(dpt_id):
+    conn = get_conn(); cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT * FROM Department WHERE Dpt_ID=%s AND Grower_ID=%s", (dpt_id, current_user.grower_id))
+    department = cur.fetchone()
+    if not department: abort(404)
+    if request.method == "POST":
+        name=request.form.get("dpt_name","").strip(); contact=request.form.get("contact","").strip(); manager=request.form.get("manager","").strip()
+        if name and contact and manager:
+            cur.execute("UPDATE Department SET Dpt_Name=%s,Contact=%s,Manager=%s WHERE Dpt_ID=%s AND Grower_ID=%s", (name,contact,manager,dpt_id,current_user.grower_id)); conn.commit()
+            cur.close(); conn.close(); return redirect(url_for("list_departments"))
+        error="All fields are required."
+    else: error=None
+    cur.execute("SELECT Grower_ID,Grower_Name FROM Grower WHERE Grower_ID=%s", (current_user.grower_id,)); growers=cur.fetchall()
+    cur.close(); conn.close(); return render_template("department_form.html",department=department,growers=growers,error=error)
 
 
 
@@ -757,6 +795,25 @@ def new_field():
     return render_template("field_form.html", departments=departments, error=None)
 
 
+@app.route("/fields/<int:field_id>/edit", methods=["GET", "POST"])
+@admin_required
+def edit_field(field_id):
+    conn=get_conn(); cur=conn.cursor(dictionary=True)
+    cur.execute("""SELECT f.* FROM Field f JOIN Department d ON d.Dpt_ID=f.Dpt_ID WHERE f.Field_ID=%s AND d.Grower_ID=%s""",(field_id,current_user.grower_id)); field=cur.fetchone()
+    if not field: abort(404)
+    cur.execute("SELECT Dpt_ID,Dpt_Name FROM Department WHERE Grower_ID=%s ORDER BY Dpt_Name",(current_user.grower_id,)); departments=cur.fetchall()
+    error=None
+    if request.method=="POST":
+        name=request.form.get("field_name","").strip(); year=request.form.get("crop_year","").strip(); dpt=request.form.get("dpt_id","").strip()
+        cur.execute("SELECT 1 FROM Department WHERE Dpt_ID=%s AND Grower_ID=%s",(dpt,current_user.grower_id)); allowed=cur.fetchone()
+        if name and year and dpt and allowed:
+            acres=request.form.get("acres","").strip(); irr=request.form.get("irr_type","").strip(); hybrid=request.form.get("hybrid_variety","").strip(); note=request.form.get("note","").strip()
+            cur.execute("""UPDATE Field SET Field_Name=%s,Acres=%s,Crop_Year=%s,Irr_Type=%s,Hybrid_Variety=%s,Note=%s,Dpt_ID=%s WHERE Field_ID=%s""",(name,float(acres) if acres else None,int(year),irr or None,hybrid or None,note or None,int(dpt),field_id)); conn.commit()
+            cur.close(); conn.close(); return redirect(url_for("list_fields"))
+        error="Field Name, Crop Year, and a valid Department are required."
+    cur.close(); conn.close(); return render_template("field_form.html",field=field,departments=departments,error=error)
+
+
 # ----------------- Cart: list + create ----------------- #
 
 @app.route("/carts")
@@ -792,6 +849,20 @@ def new_cart():
         return render_template("cart_form.html", error="Cart Code and Cart Name are required.")
 
     return render_template("cart_form.html", error=None)
+
+
+@app.route("/carts/<int:cart_id>/edit", methods=["GET", "POST"])
+@admin_required
+def edit_cart(cart_id):
+    conn=get_conn(); cur=conn.cursor(dictionary=True); cur.execute("SELECT * FROM Cart WHERE Cart_ID=%s AND Grower_ID=%s",(cart_id,current_user.grower_id)); cart=cur.fetchone()
+    if not cart: abort(404)
+    error=None
+    if request.method=="POST":
+        code=request.form.get("cart_code","").strip(); name=request.form.get("cart_name","").strip()
+        if code and name:
+            cur.execute("UPDATE Cart SET Cart_Code=%s,Cart_Name=%s WHERE Cart_ID=%s AND Grower_ID=%s",(code,name,cart_id,current_user.grower_id)); conn.commit(); cur.close(); conn.close(); return redirect(url_for("list_carts"))
+        error="Cart Code and Cart Name are required."
+    cur.close(); conn.close(); return render_template("cart_form.html",cart=cart,error=error)
 
 
 
@@ -836,6 +907,20 @@ def new_crop():
         return render_template("crop_form.html", error="All fields are required.")
 
     return render_template("crop_form.html", error=None)
+
+
+@app.route("/crops/<int:crop_id>/edit", methods=["GET", "POST"])
+@admin_required
+def edit_crop(crop_id):
+    conn=get_conn(); cur=conn.cursor(dictionary=True); cur.execute("SELECT * FROM Crop WHERE Crop_ID=%s",(crop_id,)); crop=cur.fetchone()
+    if not crop: abort(404)
+    error=None
+    if request.method=="POST":
+        code=request.form.get("crop_code","").strip(); name=request.form.get("crop_name","").strip(); weight=request.form.get("weight_per_bushel","").strip(); mc=request.form.get("base_mc","").strip()
+        if code and name and weight and mc:
+            cur.execute("UPDATE Crop SET Crop_Code=%s,Crop_Name=%s,Weight_PerBushel=%s,Base_MC=%s WHERE Crop_ID=%s",(code,name,float(weight),float(mc),crop_id)); conn.commit(); cur.close(); conn.close(); return redirect(url_for("list_crops"))
+        error="All fields are required."
+    cur.close(); conn.close(); return render_template("crop_form.html",crop=crop,error=error)
 
 
 # ----------------- Storage Location: list + create ----------------- #
@@ -902,6 +987,21 @@ def new_storage():
     return render_template("storage_form.html", error=None)
 
 
+@app.route("/storage/<int:storage_id>/edit", methods=["GET", "POST"])
+@admin_required
+def edit_storage(storage_id):
+    conn=get_conn(); cur=conn.cursor(dictionary=True); cur.execute("SELECT * FROM Storage_Location WHERE StorLoc_ID=%s AND Grower_ID=%s",(storage_id,current_user.grower_id)); storage_item=cur.fetchone()
+    if not storage_item: abort(404)
+    error=None
+    if request.method=="POST":
+        code=request.form.get("bin_code","").strip(); name=request.form.get("bin_name","").strip(); capacity=request.form.get("bin_capacity","").strip()
+        if code and name and capacity:
+            diameter=request.form.get("diameter","").strip(); installed=request.form.get("install_date","").strip(); legal=request.form.get("legal_desc","").strip(); lat=request.form.get("lattitude","").strip(); lon=request.form.get("lontitude","").strip(); manufacturer=request.form.get("manufacture","").strip()
+            cur.execute("""UPDATE Storage_Location SET Bin_Code=%s,Bin_Name=%s,Bin_Capacity=%s,Diameter=%s,Install_Date=%s,Legal_Desc=%s,Lattitude=%s,Lontitude=%s,Manufacture=%s WHERE StorLoc_ID=%s AND Grower_ID=%s""",(code,name,float(capacity),float(diameter) if diameter else None,installed or None,legal or None,float(lat) if lat else None,float(lon) if lon else None,manufacturer or None,storage_id,current_user.grower_id)); conn.commit(); cur.close(); conn.close(); return redirect(url_for("list_storage"))
+        error="Bin Code, Bin Name, and Bin Capacity are required."
+    cur.close(); conn.close(); return render_template("storage_form.html",storage_item=storage_item,error=error)
+
+
 # ----------------- Delivery Location: list + create ----------------- #
 
 @app.route("/delivery-locations")
@@ -940,6 +1040,20 @@ def new_delivery_location():
         return render_template("delivery_location_form.html", error="Delivery Location code is required.")
 
     return render_template("delivery_location_form.html", error=None)
+
+
+@app.route("/delivery-locations/<int:location_id>/edit", methods=["GET", "POST"])
+@admin_required
+def edit_delivery_location(location_id):
+    conn=get_conn(); cur=conn.cursor(dictionary=True); cur.execute("SELECT * FROM Delivery_Location WHERE DelLoc_ID=%s AND Grower_ID=%s",(location_id,current_user.grower_id)); location_item=cur.fetchone()
+    if not location_item: abort(404)
+    error=None
+    if request.method=="POST":
+        code=request.form.get("delloc_code","").strip(); location=request.form.get("location","").strip()
+        if code:
+            cur.execute("UPDATE Delivery_Location SET DelLoc_code=%s,Location=%s WHERE DelLoc_ID=%s AND Grower_ID=%s",(code,location or None,location_id,current_user.grower_id)); conn.commit(); cur.close(); conn.close(); return redirect(url_for("list_delivery_locations"))
+        error="Delivery Location code is required."
+    cur.close(); conn.close(); return render_template("delivery_location_form.html",location_item=location_item,error=error)
 
 
 
@@ -995,6 +1109,20 @@ def new_market_price():
 
     conn.close()
     return render_template("market_price_form.html", crops=crops, error=None)
+
+
+@app.route("/market-prices/<int:price_id>/edit", methods=["GET", "POST"])
+@admin_required
+def edit_market_price(price_id):
+    conn=get_conn(); cur=conn.cursor(dictionary=True); cur.execute("SELECT * FROM MarketPriceMonthly WHERE ID=%s AND Grower_ID=%s",(price_id,current_user.grower_id)); price_item=cur.fetchone()
+    if not price_item: abort(404)
+    cur.execute("SELECT Crop_ID,Crop_Name FROM Crop ORDER BY Crop_Name"); crops=cur.fetchall(); error=None
+    if request.method=="POST":
+        crop=request.form.get("crop_id","").strip(); year=request.form.get("year","").strip(); month=request.form.get("month","").strip(); day=request.form.get("day","").strip(); price=request.form.get("market_price","").strip()
+        if crop and year and month and day and price:
+            cur.execute("UPDATE MarketPriceMonthly SET Crop=%s,Year=%s,Month=%s,Day=%s,Market_Price=%s WHERE ID=%s AND Grower_ID=%s",(int(crop),int(year),int(month),day,float(price),price_id,current_user.grower_id)); conn.commit(); cur.close(); conn.close(); return redirect(url_for("list_market_prices"))
+        error="All fields are required."
+    cur.close(); conn.close(); return render_template("market_price_form.html",price_item=price_item,crops=crops,error=error)
 
 
 

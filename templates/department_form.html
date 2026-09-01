@@ -5,7 +5,7 @@
 {% block content %}
 <div class="container py-4">
 
-  <h1 class="mb-4 ">Add Department</h1>
+  <h1 class="mb-4 ">{{ 'Edit' if department else 'Add' }} Department</h1>
 
   <a href="{{ url_for('list_departments') }}" class="btn btn-link">&larr; Back to Departments</a>
 
@@ -17,17 +17,17 @@
     
     <div class="mb-3">
       <label class="form-label ">Department Name</label>
-      <input type="text" class="form-control" name="dpt_name" required>
+      <input type="text" class="form-control" name="dpt_name" value="{{ department.Dpt_Name if department else '' }}" required>
     </div>
 
     <div class="mb-3">
       <label class="form-label ">Contact</label>
-      <input type="text" class="form-control" name="contact" required>
+      <input type="text" class="form-control" name="contact" value="{{ department.Contact if department else '' }}" required>
     </div>
 
     <div class="mb-3">
       <label class="form-label ">Manager</label>
-      <input type="text" class="form-control" name="manager" required>
+      <input type="text" class="form-control" name="manager" value="{{ department.Manager if department else '' }}" required>
     </div>
 
     <div class="mb-3">
@@ -35,7 +35,7 @@
       <select class="form-select" name="grower_id" required>
         <option value="">-- Select Grower --</option>
         {% for g in growers %}
-          <option value="{{ g.Grower_ID }}">{{ g.Grower_Name }}</option>
+          <option value="{{ g.Grower_ID }}" {% if department and department.Grower_ID == g.Grower_ID %}selected{% endif %}>{{ g.Grower_Name }}</option>
         {% endfor %}
       </select>
     </div>

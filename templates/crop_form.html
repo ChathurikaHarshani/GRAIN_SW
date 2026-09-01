@@ -5,7 +5,7 @@
 {% block content %}
 
 <div class="container py-4">
-  <h1 class="mb-4 ">Add Crop</h1>
+  <h1 class="mb-4 ">{{ 'Edit' if crop else 'Add' }} Crop</h1>
   <a href="{{ url_for('list_crops') }}" class="btn btn-link">&larr; Back to Crops</a>
 
   {% if error %}<div class="alert alert-danger mt-3">{{ error }}</div>{% endif %}
@@ -14,19 +14,19 @@
     <div class="row">
       <div class="col-md-3 mb-3">
         <label class="form-label ">Crop Code</label>
-        <input type="text" class="form-control" name="crop_code" required>
+        <input type="text" class="form-control" name="crop_code" value="{{ crop.Crop_Code if crop else '' }}" required>
       </div>
       <div class="col-md-5 mb-3">
         <label class="form-label ">Crop Name</label>
-        <input type="text" class="form-control" name="crop_name" required>
+        <input type="text" class="form-control" name="crop_name" value="{{ crop.Crop_Name if crop else '' }}" required>
       </div>
       <div class="col-md-2 mb-3">
         <label class="form-label ">Wt/bu</label>
-        <input type="number" step="0.01" class="form-control" name="weight_per_bushel" required>
+        <input type="number" step="0.01" class="form-control" name="weight_per_bushel" value="{{ crop.Weight_PerBushel if crop else '' }}" required>
       </div>
       <div class="col-md-2 mb-3">
         <label class="form-label ">Base MC</label>
-        <input type="number" step="0.01" class="form-control" name="base_mc" required>
+        <input type="number" step="0.01" class="form-control" name="base_mc" value="{{ crop.Base_MC if crop else '' }}" required>
       </div>
     </div>
 

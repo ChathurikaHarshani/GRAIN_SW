@@ -7,7 +7,6 @@
 
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="mb-0 ">Growers</h1>
-    <a href="{{ url_for('new_grower') }}" class="btn btn-primary">+ Add Grower</a>
   </div>
 
   <!-- <a href="{{ url_for('dashboard') }}" class="btn btn-link">&larr; Back to Home</a> -->
@@ -18,6 +17,7 @@
         <tr>
           <th>ID</th>
           <th>Grower Name</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -25,6 +25,7 @@
           <tr>
             <td>{{ g.Grower_ID }}</td>
             <td>{{ g.Grower_Name }}</td>
+            <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('edit_grower', grower_id=g.Grower_ID) }}">Edit</a></td>
           </tr>
         {% endfor %}
       </tbody>

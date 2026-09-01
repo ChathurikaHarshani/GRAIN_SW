@@ -27,6 +27,7 @@
           <th>Lat</th>
           <th>Lon</th>
           <th>Legal Desc</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -42,6 +43,7 @@
           <td>{{ s.Lattitude }}</td>
           <td>{{ s.Lontitude }}</td>
           <td>{{ s.Legal_Desc }}</td>
+          <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('edit_storage', storage_id=s.StorLoc_ID) }}">Edit</a></td>
         </tr>
         {% endfor %}
       </tbody>

@@ -5,7 +5,7 @@
 {% block content %}
 <div class="container py-4">
 
-  <h1 class="mb-4 ">Add Grower</h1>
+  <h1 class="mb-4 ">{{ 'Edit' if grower else 'Add' }} Grower</h1>
 
   <a href="{{ url_for('list_growers') }}" class="btn btn-link">&larr; Back to Growers</a>
 
@@ -21,7 +21,7 @@
         class="form-control"
         id="grower_name"
         name="grower_name"
-        placeholder="Enter grower name"
+        placeholder="Enter grower name" value="{{ grower.Grower_Name if grower else '' }}"
         required
       >
     </div>
