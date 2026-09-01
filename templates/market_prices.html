@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Billing | GMS{% endblock %}
+{% block title %}Market Prices | GMS{% endblock %}
 
 {% block content %}
 <div class="container py-4">
@@ -14,10 +14,9 @@
 
   {% if prices %}
   <div class="table-responsive mt-3">
-    <table class="table table-striped table-hover">
+    <table class="table table-striped table-hover gms-filter-table" data-search-label="market prices">
       <thead>
         <tr>
-          <th>ID</th>
           <th>Crop</th>
           <th>Year</th>
           <th>Month</th>
@@ -29,7 +28,6 @@
       <tbody>
       {% for p in prices %}
         <tr>
-          <td>{{ p.ID }}</td>
           <td>{{ p.Crop_Name or ("Crop_ID " ~ p.Crop) }}</td>
           <td>{{ p.Year }}</td>
           <td>{{ p.Month }}</td>

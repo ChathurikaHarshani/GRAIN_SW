@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Billing | GMS{% endblock %}
+{% block title %}{{ 'Edit' if crop else 'Add' }} Crop | GMS{% endblock %}
 
 {% block content %}
 
@@ -21,16 +21,16 @@
         <input type="text" class="form-control" name="crop_name" value="{{ crop.Crop_Name if crop else '' }}" required>
       </div>
       <div class="col-md-2 mb-3">
-        <label class="form-label ">Wt/bu</label>
+        <label class="form-label ">Weight (lb/bu)</label>
         <input type="number" step="0.01" class="form-control" name="weight_per_bushel" value="{{ crop.Weight_PerBushel if crop else '' }}" required>
       </div>
       <div class="col-md-2 mb-3">
-        <label class="form-label ">Base MC</label>
+        <label class="form-label ">Base Moisture (%)</label>
         <input type="number" step="0.01" class="form-control" name="base_mc" value="{{ crop.Base_MC if crop else '' }}" required>
       </div>
     </div>
 
-    <button type="submit" class="btn btn-primary">Save</button>
+    <button type="submit" class="btn btn-primary">Save</button><a href="{{ url_for('list_crops') }}" class="btn btn-outline-secondary ms-2">Cancel</a>
   </form>
 </div>
 

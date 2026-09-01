@@ -2,11 +2,32 @@
 {% block title %}User access | GMS{% endblock %}
 {% block content %}
 <div class="container py-4"><h1>User access</h1><p class="text-muted">Manage access to {{ current_user.grower_name }}.</p>
-{% with messages = get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
-<div class="table-responsive"><table class="table align-middle"><thead><tr><th>User</th><th>Requested</th><th>Role and status</th></tr></thead><tbody>
-{% for m in memberships %}<tr><td><strong>{{ m.full_name or m.username }}</strong><div class="text-muted small">{{ m.username }}</div></td><td>{{ m.created_at }}</td><td>
-<form method="post" class="d-flex gap-2"><input type="hidden" name="membership_id" value="{{ m.id }}">
-<select class="form-select" name="role" style="max-width:140px">{% for role in ['viewer','editor','admin'] %}<option value="{{ role }}" {% if m.role==role %}selected{% endif %}>{{ role|title }}</option>{% endfor %}</select>
-<select class="form-select" name="status" style="max-width:140px">{% for status in ['pending','active','rejected'] %}<option value="{{ status }}" {% if m.status==status %}selected{% endif %}>{{ status|title }}</option>{% endfor %}</select>
-<button class="btn btn-primary">Save</button></form></td></tr>{% endfor %}</tbody></table></div></div>
+<div class="table-responsive">
+<table class="table align-middle gms-filter-table" data-search-label="users">
+<thead><tr><th>User</th><th>Requested</th><th>Current access</th><th>Actions</th></tr></thead>
+<tbody>
+{% for m in memberships %}
+<tr>
+  <td><strong>{{ m.full_name or m.username }}</strong><div class="text-muted small">{{ m.username }}</div></td>
+  <td>{{ m.created_at }}</td>
+  <td>
+    <span class="badge text-bg-{{ 'success' if m.status == 'active' else ('danger' if m.status == 'rejected' else 'warning') }}">{{ m.status|title }}</span>
+    {% if m.status == 'active' %}<span class="badge text-bg-secondary">{{ m.role|title }}</span>{% endif %}
+  </td>
+  <td>
+    <form method="post" class="d-flex flex-wrap gap-2">
+      <input type="hidden" name="membership_id" value="{{ m.id }}">
+      <button class="btn btn-sm {{ 'btn-primary' if m.status != 'active' or m.role != 'viewer' else 'btn-outline-secondary' }}" name="action" value="approve_viewer">{{ 'Approve as ' if m.status != 'active' else 'Make ' }}Viewer</button>
+      <button class="btn btn-sm {{ 'btn-primary' if m.status != 'active' or m.role != 'editor' else 'btn-outline-secondary' }}" name="action" value="approve_editor">{{ 'Approve as ' if m.status != 'active' else 'Make ' }}Editor</button>
+      <button class="btn btn-sm {{ 'btn-primary' if m.status != 'active' or m.role != 'admin' else 'btn-outline-secondary' }}" name="action" value="approve_admin">{{ 'Approve as ' if m.status != 'active' else 'Make ' }}Admin</button>
+      {% if m.status == 'active' %}
+        <button class="btn btn-sm btn-outline-warning" name="action" value="suspend" onclick="return confirm('Suspend this user’s access?')">Suspend</button>
+      {% else %}
+        <button class="btn btn-sm btn-outline-danger" name="action" value="reject" onclick="return confirm('Reject this access request?')">Reject</button>
+      {% endif %}
+    </form>
+  </td>
+</tr>
+{% endfor %}
+</tbody></table></div></div>
 {% endblock %}

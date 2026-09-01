@@ -75,6 +75,99 @@
       background: transparent !important;
       color: rgba(0,0,0,0.55) !important;
     }
+
+    .table-responsive{
+      border-radius: 12px;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .table-responsive thead th{
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #f8f9fa;
+      white-space: nowrap;
+      color: #212529;
+    }
+
+    /* Preserve strong contrast for tables that intentionally use dark headers. */
+    .table-responsive thead.table-dark th,
+    .table-responsive table.dataTable thead.table-dark th{
+      background-color: #212529 !important;
+      color: #ffffff !important;
+      border-color: #495057 !important;
+    }
+
+    .table td:last-child,
+    .table th:last-child{
+      white-space: nowrap;
+    }
+
+    .gms-table-search{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 14px 0 8px;
+    }
+
+    .gms-table-search .input-group{
+      max-width: 360px;
+    }
+
+    @media (max-width: 991.98px){
+      .navbar-collapse{
+        margin-top: 10px;
+        padding: 12px 16px;
+        border-radius: 16px;
+        background: rgba(255,255,255,0.92);
+        box-shadow: 0 14px 32px rgba(0,0,0,0.10);
+      }
+      .navbar .nav-link,
+      .dropdown-item{
+        padding-top: 10px;
+        padding-bottom: 10px;
+      }
+    }
+
+    @media (max-width: 767.98px){
+      .app-shell{
+        padding: 14px;
+        border-radius: 18px;
+      }
+      main > .container{
+        padding-left: 10px;
+        padding-right: 10px;
+      }
+      .app-shell .container{
+        padding-left: 4px;
+        padding-right: 4px;
+      }
+      .app-shell h1{
+        font-size: 1.65rem;
+      }
+      .app-shell .d-flex.justify-content-between{
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .app-shell .d-flex.justify-content-between > .btn{
+        width: 100%;
+      }
+      .form-control,
+      .form-select,
+      .btn{
+        min-height: 44px;
+      }
+      .btn-sm{
+        min-height: 38px;
+        display: inline-flex;
+        align-items: center;
+      }
+      .table{
+        font-size: .9rem;
+      }
+    }
   </style>
 </head>
 
@@ -106,15 +199,16 @@
           <li class="nav-item dropdown">
             <a class="nav-link dropdown-toggle" href="#" id="insertDataDropdown"
                role="button" data-bs-toggle="dropdown">
-              Insert Data
+              Farm Setup
             </a>
             <ul class="dropdown-menu">
               <li><a class="dropdown-item" href="{{ url_for('list_growers') }}">Growers</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('season_setup') }}">Season Setup</a></li>
               <li><a class="dropdown-item" href="{{ url_for('list_departments') }}">Departments</a></li>
               <li><a class="dropdown-item" href="{{ url_for('list_fields') }}">Fields</a></li>
               <li><a class="dropdown-item" href="{{ url_for('list_carts') }}">Carts</a></li>
               <li><a class="dropdown-item" href="{{ url_for('list_crops') }}">Crops</a></li>
-              <li><a class="dropdown-item" href="{{ url_for('list_storage') }}">Storage</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('list_storage') }}">Storage Bins</a></li>
               <li><hr class="dropdown-divider"></li>
               <li><a class="dropdown-item" href="{{ url_for('list_delivery_locations') }}">Delivery Locations</a></li>
               <li><a class="dropdown-item" href="{{ url_for('list_market_prices') }}">Market Prices</a></li>
@@ -137,7 +231,7 @@
                 <li><a class="dropdown-item" href="{{ url_for('billing') }}">Billing</a></li>
                 <li><hr class="dropdown-divider"></li>
               {% endif %}
-              <li><a class="dropdown-item" href="{{ url_for('harvest_query') }}">Harvest Query</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('harvest_query') }}">Harvest Loads</a></li>
               <li><a class="dropdown-item" href="{{ url_for('delivery') }}">Delivery</a></li>
               <li><a class="dropdown-item" href="{{ url_for('reconcile') }}">Reconcile</a></li>
             </ul>
@@ -177,6 +271,14 @@
   <!-- ================= MAIN CONTENT ================= -->
   <main class="flex-fill">
     <div class="container py-4">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        {% endfor %}
+      {% endwith %}
       <div class="app-shell">
         {% block content %}{% endblock %}
       </div>
@@ -192,6 +294,40 @@
 
   <!-- Bootstrap JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+  <script>
+    document.querySelectorAll("table.gms-filter-table").forEach((table, tableIndex) => {
+      const rows = Array.from(table.tBodies[0]?.rows || []);
+      if (!rows.length) return;
+      const label = table.dataset.searchLabel || "records";
+      const toolbar = document.createElement("div");
+      toolbar.className = "gms-table-search";
+      const inputId = `gms-table-search-${tableIndex}`;
+      toolbar.innerHTML = `
+        <div class="input-group">
+          <span class="input-group-text" aria-hidden="true">Search</span>
+          <input id="${inputId}" type="search" class="form-control" placeholder="Filter ${label}..." aria-label="Filter ${label}">
+        </div>
+        <span class="text-muted small gms-result-count"></span>`;
+      const wrapper = table.closest(".table-responsive") || table;
+      wrapper.parentNode.insertBefore(toolbar, wrapper);
+      const input = toolbar.querySelector("input");
+      const count = toolbar.querySelector(".gms-result-count");
+
+      const applyFilter = () => {
+        const query = input.value.trim().toLocaleLowerCase();
+        let visible = 0;
+        rows.forEach((row) => {
+          const matches = !query || row.textContent.toLocaleLowerCase().includes(query);
+          row.hidden = !matches;
+          if (matches) visible += 1;
+        });
+        count.textContent = `${visible} of ${rows.length} ${label}`;
+      };
+      input.addEventListener("input", applyFilter);
+      applyFilter();
+    });
+  </script>
 
   {% block scripts %}{% endblock %}
 </body>

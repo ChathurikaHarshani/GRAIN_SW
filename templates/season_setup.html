@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Season Setup | GMS{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div><h1 class="mb-1">Season Setup</h1><p class="text-muted mb-0">Prepare {{ current_user.grower_name }} for the {{ target_year }} harvest.</p></div>
+    <a class="btn btn-success" href="{{ url_for('harvest_query') }}#harvest-load-form">Enter Test Load</a>
+  </div>
+  <form method="get" class="card card-body mb-4"><div class="row g-3 align-items-end">
+    <div class="col-md-3"><label class="form-label">Target crop year</label><input class="form-control" type="number" min="1900" max="2100" name="target_year" value="{{ target_year }}" required></div>
+    <div class="col-md-3"><label class="form-label">Copy fields from</label><select class="form-select" name="source_year">{% for year in available_years %}<option value="{{ year }}" {% if year==source_year %}selected{% endif %}>{{ year }}</option>{% else %}<option value="{{ source_year }}">{{ source_year }}</option>{% endfor %}</select></div>
+    <div class="col-md-3"><button class="btn btn-primary" type="submit">Review Season</button></div>
+  </div></form>
+
+  <div class="row g-4">
+    <div class="col-lg-7"><div class="card h-100"><div class="card-body"><h2 class="h4">Readiness checklist</h2>
+      <div class="list-group list-group-flush">{% for item in checklist %}<div class="list-group-item d-flex justify-content-between align-items-center px-0">
+        <div><span class="me-2 {{ 'text-success' if item.done else 'text-warning' }}">{{ '✓' if item.done else '○' }}</span>{{ item.label }}</div><span class="text-muted small">{{ item.detail }}</span>
+      </div>{% endfor %}</div>
+    </div></div></div>
+    <div class="col-lg-5"><div class="card h-100"><div class="card-body"><h2 class="h4">Copy prior-year fields</h2>
+      <p>Copy field names, departments, acres, irrigation, and hybrid information from {{ source_year }} into {{ target_year }}.</p>
+      <p class="text-muted">{{ counts.source_fields }} source fields found. Fields already present in {{ target_year }} will be skipped.</p>
+      <form method="post" onsubmit="return confirm('Copy fields from {{ source_year }} into {{ target_year }}?')">
+        <input type="hidden" name="source_year" value="{{ source_year }}"><input type="hidden" name="target_year" value="{{ target_year }}">
+        <button class="btn btn-primary" {% if counts.source_fields == 0 %}disabled{% endif %}>Copy Fields to {{ target_year }}</button>
+      </form>
+    </div></div></div>
+  </div>
+</div>
+{% endblock %}

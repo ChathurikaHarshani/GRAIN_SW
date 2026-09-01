@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Billing | GMS{% endblock %}
+{% block title %}{{ 'Edit' if grower else 'Add' }} Grower | GMS{% endblock %}
 
 {% block content %}
 <div class="container py-4">
@@ -26,7 +26,7 @@
       >
     </div>
 
-    <button type="submit" class="btn btn-primary">Save</button>
+    <button type="submit" class="btn btn-primary">Save</button><a href="{{ url_for('list_growers') }}" class="btn btn-outline-secondary ms-2">Cancel</a>
   </form>
 
 </div>

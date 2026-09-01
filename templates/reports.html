@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Billing | GMS{% endblock %}
+{% block title %}Reports | GMS{% endblock %}
 
 {% block content %}
 <div class="container py-4">
@@ -22,11 +22,11 @@
       </div>
     </div>
 
-<!-- Harvest Query -->
+<!-- Harvest Loads -->
 <div class="col-md-4">
   <div class="card h-100 shadow-sm">
     <div class="card-body">
-      <h5 class="card-title">Harvest Query</h5>
+      <h5 class="card-title">Harvest Loads</h5>
       <p class="card-text">Query harvest loads with summary calculations.</p>
       <a href="{{ url_for('harvest_query') }}" class="btn btn-sm btn-primary">Open</a>
     </div>

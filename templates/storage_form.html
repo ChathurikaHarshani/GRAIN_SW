@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}Billing | GMS{% endblock %}
+{% block title %}{{ 'Edit' if storage_item else 'Add' }} Storage Bin | GMS{% endblock %}
 
 {% block content %}
 <div class="container py-4">
 
-  <h1 class="mb-4 ">{{ 'Edit' if storage_item else 'Add' }} Storage Location</h1>
-  <a href="{{ url_for('list_storage') }}" class="btn btn-link">&larr; Back to Storage</a>
+  <h1 class="mb-4 ">{{ 'Edit' if storage_item else 'Add' }} Storage Bin</h1>
+  <a href="{{ url_for('list_storage') }}" class="btn btn-link">&larr; Back to Storage Bins</a>
 
   {% if error %}
     <div class="alert alert-danger mt-3">{{ error }}</div>
@@ -58,7 +58,7 @@
       </div>
     </div>
 
-    <button type="submit" class="btn btn-primary">Save</button>
+    <button type="submit" class="btn btn-primary">Save</button><a href="{{ url_for('list_storage') }}" class="btn btn-outline-secondary ms-2">Cancel</a>
   </form>
 
 </div>

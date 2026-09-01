@@ -367,10 +367,17 @@ def manage_users():
     cur = conn.cursor(dictionary=True)
     if request.method == "POST":
         membership_id = request.form.get("membership_id", type=int)
-        role = request.form.get("role", "viewer")
-        status = request.form.get("status", "pending")
-        if role not in {"viewer", "editor", "admin"} or status not in {"pending", "active", "rejected"}:
+        action = request.form.get("action", "")
+        action_map = {
+            "approve_viewer": ("viewer", "active"),
+            "approve_editor": ("editor", "active"),
+            "approve_admin": ("admin", "active"),
+            "reject": ("viewer", "rejected"),
+            "suspend": ("viewer", "pending"),
+        }
+        if not membership_id or action not in action_map:
             abort(400)
+        role, status = action_map[action]
         cur.execute("SELECT user_id, role, status FROM grower_memberships WHERE id=%s AND Grower_ID=%s", (membership_id, current_user.grower_id))
         existing = cur.fetchone()
         if not existing:
@@ -383,7 +390,14 @@ def manage_users():
                 WHERE id=%s AND Grower_ID=%s""",
                 (role, status, status, status, current_user.id, membership_id, current_user.grower_id))
             conn.commit()
-            flash("User access updated.", "success")
+            messages = {
+                "approve_viewer": "User approved as Viewer.",
+                "approve_editor": "User approved as Editor.",
+                "approve_admin": "User approved as Admin.",
+                "reject": "Access request rejected.",
+                "suspend": "User access suspended.",
+            }
+            flash(messages[action], "success")
         return redirect(url_for("manage_users"))
     cur.execute("""
         SELECT gm.id, u.username, u.full_name, gm.role, gm.status, gm.created_at
@@ -393,6 +407,71 @@ def manage_users():
     memberships = cur.fetchall()
     cur.close(); conn.close()
     return render_template("users.html", memberships=memberships)
+
+
+@app.route("/season-setup", methods=["GET", "POST"])
+@admin_required
+def season_setup():
+    default_target = date.today().year
+    target_year = request.values.get("target_year", str(default_target)).strip()
+    source_year = request.values.get("source_year", str(int(target_year or default_target) - 1)).strip()
+    try:
+        target_year_int = int(target_year)
+        source_year_int = int(source_year)
+        if not 1900 <= target_year_int <= 2100 or not 1900 <= source_year_int <= 2100:
+            raise ValueError
+    except ValueError:
+        abort(400)
+
+    conn = get_conn(); cur = conn.cursor(dictionary=True)
+    if request.method == "POST":
+        if source_year_int == target_year_int:
+            flash("Source and target crop years must be different.", "danger")
+        else:
+            cur.execute("""
+                INSERT INTO Field (Field_Name, Acres, Crop_Year, Irr_Type, Hybrid_Variety, Note, Dpt_ID)
+                SELECT src.Field_Name, src.Acres, %s, src.Irr_Type, src.Hybrid_Variety,
+                       CONCAT('Copied from ', %s, IF(src.Note IS NULL OR src.Note='', '', CONCAT(' — ', src.Note))),
+                       src.Dpt_ID
+                FROM Field src JOIN Department d ON d.Dpt_ID=src.Dpt_ID
+                WHERE d.Grower_ID=%s AND src.Crop_Year=%s
+                  AND NOT EXISTS (
+                    SELECT 1 FROM Field existing
+                    WHERE existing.Dpt_ID=src.Dpt_ID AND existing.Field_Name=src.Field_Name
+                      AND existing.Crop_Year=%s
+                  )
+            """, (target_year_int, source_year_int, current_user.grower_id, source_year_int, target_year_int))
+            copied = cur.rowcount
+            conn.commit()
+            flash(f"Copied {copied} field{'s' if copied != 1 else ''} into crop year {target_year_int}. Existing fields were skipped.", "success")
+        cur.close(); conn.close()
+        return redirect(url_for("season_setup", target_year=target_year_int, source_year=source_year_int))
+
+    counts = {}
+    checks = {
+        "departments": ("SELECT COUNT(*) AS n FROM Department WHERE Grower_ID=%s", (current_user.grower_id,)),
+        "source_fields": ("""SELECT COUNT(*) AS n FROM Field f JOIN Department d ON d.Dpt_ID=f.Dpt_ID WHERE d.Grower_ID=%s AND f.Crop_Year=%s""", (current_user.grower_id, source_year_int)),
+        "target_fields": ("""SELECT COUNT(*) AS n FROM Field f JOIN Department d ON d.Dpt_ID=f.Dpt_ID WHERE d.Grower_ID=%s AND f.Crop_Year=%s""", (current_user.grower_id, target_year_int)),
+        "carts": ("SELECT COUNT(*) AS n FROM Cart WHERE Grower_ID=%s", (current_user.grower_id,)),
+        "storage": ("SELECT COUNT(*) AS n FROM Storage_Location WHERE Grower_ID=%s", (current_user.grower_id,)),
+        "active_users": ("SELECT COUNT(*) AS n FROM grower_memberships WHERE Grower_ID=%s AND status='active'", (current_user.grower_id,)),
+        "test_loads": ("""SELECT COUNT(*) AS n FROM Harvest h JOIN Field f ON f.Field_ID=h.Field_ID JOIN Department d ON d.Dpt_ID=f.Dpt_ID WHERE d.Grower_ID=%s AND f.Crop_Year=%s""", (current_user.grower_id, target_year_int)),
+    }
+    for key, (sql, params) in checks.items():
+        cur.execute(sql, params); counts[key] = int((cur.fetchone() or {}).get("n") or 0)
+    cur.execute("""SELECT DISTINCT f.Crop_Year FROM Field f JOIN Department d ON d.Dpt_ID=f.Dpt_ID WHERE d.Grower_ID=%s ORDER BY f.Crop_Year DESC""", (current_user.grower_id,))
+    available_years = [int(row["Crop_Year"]) for row in cur.fetchall()]
+    cur.close(); conn.close()
+    checklist = [
+        {"label": "Departments available", "done": counts["departments"] > 0, "detail": f'{counts["departments"]} departments'},
+        {"label": f"Fields created for {target_year_int}", "done": counts["target_fields"] > 0, "detail": f'{counts["target_fields"]} fields'},
+        {"label": "Grain carts reviewed", "done": counts["carts"] > 0, "detail": f'{counts["carts"]} carts'},
+        {"label": "Storage bins reviewed", "done": counts["storage"] > 0, "detail": f'{counts["storage"]} locations'},
+        {"label": "Users approved", "done": counts["active_users"] > 0, "detail": f'{counts["active_users"]} active users'},
+        {"label": "Test harvest load entered", "done": counts["test_loads"] > 0, "detail": f'{counts["test_loads"]} loads'},
+    ]
+    return render_template("season_setup.html", target_year=target_year_int, source_year=source_year_int,
+                           available_years=available_years, counts=counts, checklist=checklist)
 
 
 
@@ -498,6 +577,25 @@ def dashboard():
     """, (dashboard_year, current_user.grower_id))
     delivery_totals = cur.fetchone() or {}
 
+    cur.execute("""
+        SELECT COUNT(*) AS n FROM Harvest h
+        JOIN Field f ON f.Field_ID=h.Field_ID JOIN Department d ON d.Dpt_ID=f.Dpt_ID
+        WHERE d.Grower_ID=%s AND h.Harvest_Date=%s
+    """, (current_user.grower_id, date.today()))
+    today_loads = int((cur.fetchone() or {}).get("n") or 0)
+
+    cur.execute("""SELECT COUNT(*) AS n FROM grower_memberships
+        WHERE Grower_ID=%s AND status='pending'""", (current_user.grower_id,))
+    pending_users = int((cur.fetchone() or {}).get("n") or 0)
+
+    cur.execute("""
+        SELECT COUNT(*) AS n FROM Harvest h
+        JOIN Field f ON f.Field_ID=h.Field_ID JOIN Department d ON d.Dpt_ID=f.Dpt_ID
+        WHERE d.Grower_ID=%s AND f.Crop_Year=%s
+          AND (h.Gross_Weight IS NULL OR h.MC IS NULL OR h.StorLoc_ID IS NULL)
+    """, (current_user.grower_id, dashboard_year))
+    incomplete_loads = int((cur.fetchone() or {}).get("n") or 0)
+
     cur.close()
     conn.close()
 
@@ -532,6 +630,9 @@ def dashboard():
         "delivery_count": int(delivery_totals.get("delivery_count") or 0),
         "user_count": int(user_totals.get("user_count") or 0),
         "admin_count": int(user_totals.get("admin_count") or 0),
+        "today_loads": today_loads,
+        "pending_users": pending_users,
+        "incomplete_loads": incomplete_loads,
         "monthly_delivery_labels": month_labels,
         "monthly_delivery_bushels": monthly_bushels,
         "inventory_labels": [item[0] for item in top_inventory],
@@ -615,6 +716,7 @@ def new_grower():
             conn.commit()
             cur.close()
             conn.close()
+            flash("Grower created successfully.", "success")
             return redirect(url_for("list_growers"))
         else:
             # No name entered; redisplay form with error
@@ -638,7 +740,7 @@ def edit_grower(grower_id):
         name = request.form.get("grower_name", "").strip()
         if name:
             cur.execute("UPDATE Grower SET Grower_Name=%s WHERE Grower_ID=%s", (name, grower_id)); conn.commit()
-            cur.close(); conn.close(); return redirect(url_for("list_growers"))
+            cur.close(); conn.close(); flash("Grower updated successfully.", "success"); return redirect(url_for("list_growers"))
         error = "Grower name is required."
     cur.close(); conn.close()
     return render_template("grower_form.html", grower=grower, error=error)
@@ -693,6 +795,7 @@ def new_department():
             conn.commit()
             cur.close()
             conn.close()
+            flash("Department created successfully.", "success")
             return redirect(url_for("list_departments"))
 
         return render_template(
@@ -716,7 +819,7 @@ def edit_department(dpt_id):
         name=request.form.get("dpt_name","").strip(); contact=request.form.get("contact","").strip(); manager=request.form.get("manager","").strip()
         if name and contact and manager:
             cur.execute("UPDATE Department SET Dpt_Name=%s,Contact=%s,Manager=%s WHERE Dpt_ID=%s AND Grower_ID=%s", (name,contact,manager,dpt_id,current_user.grower_id)); conn.commit()
-            cur.close(); conn.close(); return redirect(url_for("list_departments"))
+            cur.close(); conn.close(); flash("Department updated successfully.", "success"); return redirect(url_for("list_departments"))
         error="All fields are required."
     else: error=None
     cur.execute("SELECT Grower_ID,Grower_Name FROM Grower WHERE Grower_ID=%s", (current_user.grower_id,)); growers=cur.fetchall()
@@ -786,6 +889,7 @@ def new_field():
             conn.commit()
             cur.close()
             conn.close()
+            flash("Field created successfully.", "success")
             return redirect(url_for("list_fields"))
 
         conn.close()
@@ -809,7 +913,7 @@ def edit_field(field_id):
         if name and year and dpt and allowed:
             acres=request.form.get("acres","").strip(); irr=request.form.get("irr_type","").strip(); hybrid=request.form.get("hybrid_variety","").strip(); note=request.form.get("note","").strip()
             cur.execute("""UPDATE Field SET Field_Name=%s,Acres=%s,Crop_Year=%s,Irr_Type=%s,Hybrid_Variety=%s,Note=%s,Dpt_ID=%s WHERE Field_ID=%s""",(name,float(acres) if acres else None,int(year),irr or None,hybrid or None,note or None,int(dpt),field_id)); conn.commit()
-            cur.close(); conn.close(); return redirect(url_for("list_fields"))
+            cur.close(); conn.close(); flash("Field updated successfully.", "success"); return redirect(url_for("list_fields"))
         error="Field Name, Crop Year, and a valid Department are required."
     cur.close(); conn.close(); return render_template("field_form.html",field=field,departments=departments,error=error)
 
@@ -844,6 +948,7 @@ def new_cart():
             conn.commit()
             cur.close()
             conn.close()
+            flash("Cart created successfully.", "success")
             return redirect(url_for("list_carts"))
 
         return render_template("cart_form.html", error="Cart Code and Cart Name are required.")
@@ -860,7 +965,7 @@ def edit_cart(cart_id):
     if request.method=="POST":
         code=request.form.get("cart_code","").strip(); name=request.form.get("cart_name","").strip()
         if code and name:
-            cur.execute("UPDATE Cart SET Cart_Code=%s,Cart_Name=%s WHERE Cart_ID=%s AND Grower_ID=%s",(code,name,cart_id,current_user.grower_id)); conn.commit(); cur.close(); conn.close(); return redirect(url_for("list_carts"))
+            cur.execute("UPDATE Cart SET Cart_Code=%s,Cart_Name=%s WHERE Cart_ID=%s AND Grower_ID=%s",(code,name,cart_id,current_user.grower_id)); conn.commit(); cur.close(); conn.close(); flash("Cart updated successfully.", "success"); return redirect(url_for("list_carts"))
         error="Cart Code and Cart Name are required."
     cur.close(); conn.close(); return render_template("cart_form.html",cart=cart,error=error)
 
@@ -902,6 +1007,7 @@ def new_crop():
             conn.commit()
             cur.close()
             conn.close()
+            flash("Crop created successfully.", "success")
             return redirect(url_for("list_crops"))
 
         return render_template("crop_form.html", error="All fields are required.")
@@ -918,7 +1024,7 @@ def edit_crop(crop_id):
     if request.method=="POST":
         code=request.form.get("crop_code","").strip(); name=request.form.get("crop_name","").strip(); weight=request.form.get("weight_per_bushel","").strip(); mc=request.form.get("base_mc","").strip()
         if code and name and weight and mc:
-            cur.execute("UPDATE Crop SET Crop_Code=%s,Crop_Name=%s,Weight_PerBushel=%s,Base_MC=%s WHERE Crop_ID=%s",(code,name,float(weight),float(mc),crop_id)); conn.commit(); cur.close(); conn.close(); return redirect(url_for("list_crops"))
+            cur.execute("UPDATE Crop SET Crop_Code=%s,Crop_Name=%s,Weight_PerBushel=%s,Base_MC=%s WHERE Crop_ID=%s",(code,name,float(weight),float(mc),crop_id)); conn.commit(); cur.close(); conn.close(); flash("Crop updated successfully.", "success"); return redirect(url_for("list_crops"))
         error="All fields are required."
     cur.close(); conn.close(); return render_template("crop_form.html",crop=crop,error=error)
 
@@ -980,6 +1086,7 @@ def new_storage():
             conn.commit()
             cur.close()
             conn.close()
+            flash("Storage location created successfully.", "success")
             return redirect(url_for("list_storage"))
 
         return render_template("storage_form.html", error="Bin Code, Bin Name, and Bin Capacity are required.")
@@ -997,7 +1104,7 @@ def edit_storage(storage_id):
         code=request.form.get("bin_code","").strip(); name=request.form.get("bin_name","").strip(); capacity=request.form.get("bin_capacity","").strip()
         if code and name and capacity:
             diameter=request.form.get("diameter","").strip(); installed=request.form.get("install_date","").strip(); legal=request.form.get("legal_desc","").strip(); lat=request.form.get("lattitude","").strip(); lon=request.form.get("lontitude","").strip(); manufacturer=request.form.get("manufacture","").strip()
-            cur.execute("""UPDATE Storage_Location SET Bin_Code=%s,Bin_Name=%s,Bin_Capacity=%s,Diameter=%s,Install_Date=%s,Legal_Desc=%s,Lattitude=%s,Lontitude=%s,Manufacture=%s WHERE StorLoc_ID=%s AND Grower_ID=%s""",(code,name,float(capacity),float(diameter) if diameter else None,installed or None,legal or None,float(lat) if lat else None,float(lon) if lon else None,manufacturer or None,storage_id,current_user.grower_id)); conn.commit(); cur.close(); conn.close(); return redirect(url_for("list_storage"))
+            cur.execute("""UPDATE Storage_Location SET Bin_Code=%s,Bin_Name=%s,Bin_Capacity=%s,Diameter=%s,Install_Date=%s,Legal_Desc=%s,Lattitude=%s,Lontitude=%s,Manufacture=%s WHERE StorLoc_ID=%s AND Grower_ID=%s""",(code,name,float(capacity),float(diameter) if diameter else None,installed or None,legal or None,float(lat) if lat else None,float(lon) if lon else None,manufacturer or None,storage_id,current_user.grower_id)); conn.commit(); cur.close(); conn.close(); flash("Storage location updated successfully.", "success"); return redirect(url_for("list_storage"))
         error="Bin Code, Bin Name, and Bin Capacity are required."
     cur.close(); conn.close(); return render_template("storage_form.html",storage_item=storage_item,error=error)
 
@@ -1035,6 +1142,7 @@ def new_delivery_location():
             conn.commit()
             cur.close()
             conn.close()
+            flash("Delivery location created successfully.", "success")
             return redirect(url_for("list_delivery_locations"))
 
         return render_template("delivery_location_form.html", error="Delivery Location code is required.")
@@ -1051,7 +1159,7 @@ def edit_delivery_location(location_id):
     if request.method=="POST":
         code=request.form.get("delloc_code","").strip(); location=request.form.get("location","").strip()
         if code:
-            cur.execute("UPDATE Delivery_Location SET DelLoc_code=%s,Location=%s WHERE DelLoc_ID=%s AND Grower_ID=%s",(code,location or None,location_id,current_user.grower_id)); conn.commit(); cur.close(); conn.close(); return redirect(url_for("list_delivery_locations"))
+            cur.execute("UPDATE Delivery_Location SET DelLoc_code=%s,Location=%s WHERE DelLoc_ID=%s AND Grower_ID=%s",(code,location or None,location_id,current_user.grower_id)); conn.commit(); cur.close(); conn.close(); flash("Delivery location updated successfully.", "success"); return redirect(url_for("list_delivery_locations"))
         error="Delivery Location code is required."
     cur.close(); conn.close(); return render_template("delivery_location_form.html",location_item=location_item,error=error)
 
@@ -1102,6 +1210,7 @@ def new_market_price():
             conn.commit()
             cur.close()
             conn.close()
+            flash("Market price created successfully.", "success")
             return redirect(url_for("list_market_prices"))
 
         conn.close()
@@ -1120,7 +1229,7 @@ def edit_market_price(price_id):
     if request.method=="POST":
         crop=request.form.get("crop_id","").strip(); year=request.form.get("year","").strip(); month=request.form.get("month","").strip(); day=request.form.get("day","").strip(); price=request.form.get("market_price","").strip()
         if crop and year and month and day and price:
-            cur.execute("UPDATE MarketPriceMonthly SET Crop=%s,Year=%s,Month=%s,Day=%s,Market_Price=%s WHERE ID=%s AND Grower_ID=%s",(int(crop),int(year),int(month),day,float(price),price_id,current_user.grower_id)); conn.commit(); cur.close(); conn.close(); return redirect(url_for("list_market_prices"))
+            cur.execute("UPDATE MarketPriceMonthly SET Crop=%s,Year=%s,Month=%s,Day=%s,Market_Price=%s WHERE ID=%s AND Grower_ID=%s",(int(crop),int(year),int(month),day,float(price),price_id,current_user.grower_id)); conn.commit(); cur.close(); conn.close(); flash("Market price updated successfully.", "success"); return redirect(url_for("list_market_prices"))
         error="All fields are required."
     cur.close(); conn.close(); return render_template("market_price_form.html",price_item=price_item,crops=crops,error=error)
 
@@ -1365,7 +1474,7 @@ def harvest_query():
     """, (current_user.grower_id,))
     years = cur.fetchall()
 
-    cur.execute("SELECT Crop_ID, Crop_Name, Weight_PerBushel FROM Crop ORDER BY Crop_Name;")
+    cur.execute("SELECT Crop_ID, Crop_Name, Weight_PerBushel, Base_MC FROM Crop ORDER BY Crop_Name;")
     crops = cur.fetchall()
 
     cur.execute("SELECT Cart_ID, Cart_Name FROM Cart WHERE Grower_ID=%s ORDER BY Cart_Name;", (current_user.grower_id,))
@@ -1410,10 +1519,24 @@ def harvest_query():
         tare = request.form.get("tare", "").strip()
         note = request.form.get("note", "").strip()
 
+        duplicate_load = False
+        if load_num and harvest_date and field_id and cart_id:
+            cur.execute("""
+                SELECT h.Harvest_ID FROM Harvest h
+                JOIN Field f ON f.Field_ID=h.Field_ID
+                JOIN Department d ON d.Dpt_ID=f.Dpt_ID
+                WHERE d.Grower_ID=%s AND h.Load_Num=%s AND h.Harvest_Date=%s
+                  AND h.Field_ID=%s AND h.Cart_ID=%s AND h.Harvest_ID<>%s
+                LIMIT 1
+            """, (current_user.grower_id, load_num, harvest_date, field_id, cart_id, int(harvest_id or 0)))
+            duplicate_load = cur.fetchone() is not None
+
         if not (load_num and harvest_date and field_id and crop_id and cart_id):
             error = "Load, Date, Field, Crop, and Cart are required."
         elif not harvest_id and not storloc_id:
             error = "Storage is required for new loads."
+        elif duplicate_load:
+            error = "A load with this number, date, field, and cart already exists. Review the existing load instead of saving a duplicate."
         else:
             cur.execute("""SELECT f.Dpt_ID FROM Field f JOIN Department d ON d.Dpt_ID=f.Dpt_ID
                 WHERE f.Field_ID=%s AND d.Grower_ID=%s""", (field_id, current_user.grower_id))
@@ -1487,6 +1610,14 @@ def harvest_query():
                 conn.commit()
                 cur2.close()
 
+                session["harvest_entry_defaults"] = {
+                    "field_id": field_id,
+                    "storloc_id": storloc_id,
+                    "crop_id": crop_id,
+                    "cart_id": cart_id,
+                }
+                flash(f"Harvest load {load_num} {'updated' if harvest_id else 'saved'} successfully.", "success")
+
                 return redirect(url_for(
                     "harvest_query",
                     field_id=selected_field_id,
@@ -1544,6 +1675,26 @@ def harvest_query():
 
     loads = cur.fetchall()
 
+    entry_defaults = dict(session.get("harvest_entry_defaults", {}))
+    if request.method == "POST" and error:
+        entry_defaults.update({
+            "field_id": request.form.get("field_id", ""),
+            "storloc_id": request.form.get("storloc_id", ""),
+            "crop_id": request.form.get("crop_id", ""),
+            "cart_id": request.form.get("cart_id", ""),
+            "load_num": request.form.get("load_num", ""),
+            "harvest_date": request.form.get("harvest_date", ""),
+        })
+
+    cur.execute("""
+        SELECT MAX(CAST(h.Load_Num AS UNSIGNED)) AS max_load
+        FROM Harvest h JOIN Field f ON f.Field_ID=h.Field_ID
+        JOIN Department d ON d.Dpt_ID=f.Dpt_ID
+        WHERE d.Grower_ID=%s AND h.Harvest_Date=%s AND h.Load_Num REGEXP '^[0-9]+$'
+    """, (current_user.grower_id, date.today()))
+    max_load = (cur.fetchone() or {}).get("max_load")
+    next_load_num = str(int(max_load or 0) + 1)
+
     for row in loads:
         calculated_bushels = calculate_bushels(
             float(row["Gross_Weight"]) if row["Gross_Weight"] is not None else None,
@@ -1594,7 +1745,10 @@ def harvest_query():
         lbs_wet=lbs_wet,
         bu_wet=bu_wet,
         dry_bushels=bushels_sum,
-        edit_load=edit_load
+        edit_load=edit_load,
+        entry_defaults=entry_defaults,
+        today=date.today().isoformat(),
+        next_load_num=next_load_num
     )
 
 

@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}Harvest Query | GMS{% endblock %}
+{% block title %}Harvest Loads | GMS{% endblock %}
 
 {% block content %}
 <div class="container py-4">
 
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="mb-0">Harvest Query</h1>
+    <h1 class="mb-0">Harvest Loads</h1>
   </div>
 
   <!-- Filter bar -->
@@ -84,12 +84,13 @@
 
     <div class="col-md-2">
       <label class="form-label">Load</label>
-      <input class="form-control" name="load_num" value="{{ edit_load.Load_Num if edit_load else '' }}" required>
+      <input class="form-control" name="load_num" value="{{ edit_load.Load_Num if edit_load else (entry_defaults.load_num or next_load_num) }}" required>
+      {% if not edit_load %}<div class="form-text">Suggested from today's loads</div>{% endif %}
     </div>
 
     <div class="col-md-2">
       <label class="form-label">Date</label>
-      <input type="date" class="form-control" name="harvest_date" value="{{ edit_load.Harvest_Date if edit_load else '' }}" required>
+      <input type="date" class="form-control" name="harvest_date" value="{{ edit_load.Harvest_Date if edit_load else (entry_defaults.harvest_date or today) }}" required>
     </div>
 
     <div class="col-md-3">
@@ -97,7 +98,7 @@
       <select class="form-select" name="field_id" required>
         <option value="">-- Select Field --</option>
         {% for f in entry_fields %}
-          <option value="{{ f.Field_ID }}" {% if edit_load and edit_load.Field_ID|string == f.Field_ID|string %}selected{% endif %}>
+          <option value="{{ f.Field_ID }}" {% if (edit_load and edit_load.Field_ID|string == f.Field_ID|string) or (not edit_load and entry_defaults.field_id|string == f.Field_ID|string) %}selected{% endif %}>
             {{ f.Field_Name }} - {{ f.Crop_Year }}
           </option>
         {% endfor %}
@@ -109,7 +110,7 @@
       <select class="form-select" name="storloc_id" {% if not edit_load %}required{% endif %}>
         <option value="">-- Select Storage --</option>
         {% for s in storages %}
-          <option value="{{ s.StorLoc_ID }}" {% if edit_load and edit_load.StorLoc_ID|string == s.StorLoc_ID|string %}selected{% endif %}>
+          <option value="{{ s.StorLoc_ID }}" {% if (edit_load and edit_load.StorLoc_ID|string == s.StorLoc_ID|string) or (not edit_load and entry_defaults.storloc_id|string == s.StorLoc_ID|string) %}selected{% endif %}>
             {{ s.Bin_Name }}
           </option>
         {% endfor %}
@@ -118,10 +119,10 @@
 
     <div class="col-md-2">
       <label class="form-label">Crop</label>
-      <select class="form-select" name="crop_id" required>
+      <select class="form-select" name="crop_id" id="entry-crop" required>
         <option value="">-- Select Crop --</option>
         {% for c in crops %}
-          <option value="{{ c.Crop_ID }}" {% if edit_load and edit_load.Crop_ID|string == c.Crop_ID|string %}selected{% endif %}>
+          <option value="{{ c.Crop_ID }}" data-wpb="{{ c.Weight_PerBushel }}" data-base-mc="{{ c.Base_MC }}" {% if (edit_load and edit_load.Crop_ID|string == c.Crop_ID|string) or (not edit_load and entry_defaults.crop_id|string == c.Crop_ID|string) %}selected{% endif %}>
             {{ c.Crop_Name }}
           </option>
         {% endfor %}
@@ -133,7 +134,7 @@
       <select class="form-select" name="cart_id" required>
         <option value="">-- Select Cart --</option>
         {% for c in carts %}
-          <option value="{{ c.Cart_ID }}" {% if edit_load and edit_load.Cart_ID|string == c.Cart_ID|string %}selected{% endif %}>
+          <option value="{{ c.Cart_ID }}" {% if (edit_load and edit_load.Cart_ID|string == c.Cart_ID|string) or (not edit_load and entry_defaults.cart_id|string == c.Cart_ID|string) %}selected{% endif %}>
             {{ c.Cart_Name }}
           </option>
         {% endfor %}
@@ -141,23 +142,23 @@
     </div>
 
     <div class="col-md-2">
-      <label class="form-label">MC</label>
-      <input type="number" step="0.01" class="form-control" name="mc" value="{{ edit_load.MC if edit_load and edit_load.MC is not none else '' }}">
+      <label class="form-label">Moisture (%)</label>
+      <input type="number" step="0.01" class="form-control" id="entry-mc" name="mc" value="{{ edit_load.MC if edit_load and edit_load.MC is not none else '' }}">
     </div>
 
     <div class="col-md-2">
-      <label class="form-label">Gross</label>
-      <input type="number" step="0.01" class="form-control" name="gross" value="{{ edit_load.Gross_Weight if edit_load and edit_load.Gross_Weight is not none else '' }}">
+      <label class="form-label">Gross (lb)</label>
+      <input type="number" step="0.01" class="form-control" id="entry-gross" name="gross" value="{{ edit_load.Gross_Weight if edit_load and edit_load.Gross_Weight is not none else '' }}">
     </div>
 
     <div class="col-md-2">
-      <label class="form-label">Tare</label>
-      <input type="number" step="0.01" class="form-control" name="tare" value="{{ edit_load.Tare_Weight if edit_load and edit_load.Tare_Weight is not none else '' }}">
+      <label class="form-label">Tare (lb)</label>
+      <input type="number" step="0.01" class="form-control" id="entry-tare" name="tare" value="{{ edit_load.Tare_Weight if edit_load and edit_load.Tare_Weight is not none else '' }}">
     </div>
 
     <div class="col-md-2">
-      <label class="form-label">Bushels</label>
-      <input type="text" class="form-control" name="Bushels" value="Auto-calculated" readonly>
+      <label class="form-label">Estimated Bushels</label>
+      <input type="text" class="form-control" id="entry-bushels" value="Enter weights" readonly>
     </div>
 
     <div class="col-md-4">
@@ -287,5 +288,36 @@
       filterForm.submit();
     });
   }
+
+  const cropSelect = document.getElementById("entry-crop");
+  const moistureInput = document.getElementById("entry-mc");
+  const grossInput = document.getElementById("entry-gross");
+  const tareInput = document.getElementById("entry-tare");
+  const bushelOutput = document.getElementById("entry-bushels");
+
+  function updateBushelEstimate() {
+    if (!cropSelect || !grossInput || !bushelOutput) return;
+    const option = cropSelect.options[cropSelect.selectedIndex];
+    const wpb = Number(option?.dataset.wpb);
+    const baseMc = Number(option?.dataset.baseMc);
+    const gross = Number(grossInput.value);
+    const tare = Number(tareInput?.value || 0);
+    const mc = moistureInput?.value === "" ? null : Number(moistureInput.value);
+    if (!wpb || !gross || gross < tare) {
+      bushelOutput.value = "Enter weights";
+      return;
+    }
+    let bushels = (gross - tare) / wpb;
+    if (mc !== null && Number.isFinite(baseMc) && mc > baseMc) {
+      bushels *= (100 - mc) / (100 - baseMc);
+    }
+    bushelOutput.value = `${bushels.toFixed(2)} bu`;
+  }
+
+  [cropSelect, moistureInput, grossInput, tareInput].forEach((element) => {
+    element?.addEventListener("input", updateBushelEstimate);
+    element?.addEventListener("change", updateBushelEstimate);
+  });
+  updateBushelEstimate();
 </script>
 {% endblock %}

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Billing | GMS{% endblock %}
+{% block title %}{{ 'Edit' if price_item else 'Add' }} Market Price | GMS{% endblock %}
 
 {% block content %}
 
@@ -44,7 +44,7 @@
       <input type="number" step="0.0001" class="form-control" name="market_price" value="{{ price_item.Market_Price if price_item else '' }}" required>
     </div>
 
-    <button type="submit" class="btn btn-primary">Save</button>
+    <button type="submit" class="btn btn-primary">Save</button><a href="{{ url_for('list_market_prices') }}" class="btn btn-outline-secondary ms-2">Cancel</a>
   </form>
 
 </div>

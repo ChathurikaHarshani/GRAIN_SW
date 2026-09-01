@@ -26,15 +26,11 @@
       </p>
 
       <div class="d-flex flex-wrap gap-2">
-        <a href="{{ url_for('dashboard') }}" class="btn btn-primary">
-          <i class="bi bi-speedometer2 me-1"></i> Dashboard
+        <a href="{{ url_for('harvest_query') }}{% if can_edit %}#harvest-load-form{% endif %}" class="btn btn-primary">
+          <i class="bi bi-{{ 'plus-circle' if can_edit else 'list' }} me-1"></i> {{ 'Add Harvest Load' if can_edit else 'View Harvest Loads' }}
         </a>
-        <a href="{{ url_for('delivery') }}" class="btn btn-outline-secondary">
-          <i class="bi bi-truck me-1"></i> Enter Delivery
-        </a>
-        <a href="{{ url_for('harvest_query') }}" class="btn btn-outline-dark">
-          <i class="bi bi-search me-1"></i> Harvest Query
-        </a>
+        {% if current_user.is_admin %}<a href="{{ url_for('season_setup') }}" class="btn btn-outline-dark"><i class="bi bi-calendar-check me-1"></i> Season Setup</a>{% endif %}
+        <a href="{{ url_for('inventory_report') }}" class="btn btn-outline-secondary"><i class="bi bi-box-seam me-1"></i> View Inventory</a>
       </div>
 
       <!-- QUICK ACTIONS -->
@@ -43,9 +39,9 @@
           <span class="text-muted small">Quick actions</span>
 
           <div class="d-flex flex-wrap gap-2">
-            <a class="btn btn-sm btn-light border" href="{{ url_for('billing') }}">
+            {% if current_user.is_admin %}<a class="btn btn-sm btn-light border" href="{{ url_for('billing') }}">
               <i class="bi bi-receipt me-1"></i> Billing
-            </a>
+            </a>{% endif %}
             <a class="btn btn-sm btn-light border" href="{{ url_for('reconcile') }}">
               <i class="bi bi-clipboard-check me-1"></i> Reconcile
             </a>
@@ -75,6 +71,24 @@
     </div>
 
   </div>
+</div>
+
+<!-- ================= TODAY / ATTENTION ================= -->
+<div class="row g-3 mb-4">
+  <div class="col-md-4"><a class="text-decoration-none text-reset" href="{{ url_for('harvest_query') }}">
+    <div class="main-content shadow-sm h-100 gms-card border-start border-primary border-4">
+      <div class="text-muted small">Today</div><div class="fs-3 fw-bold">{{ dashboard_data.today_loads }}</div><div>harvest loads entered</div>
+    </div></a></div>
+  <div class="col-md-4">
+    {% if current_user.is_admin %}<a class="text-decoration-none text-reset" href="{{ url_for('manage_users') }}">{% endif %}
+    <div class="main-content shadow-sm h-100 gms-card border-start {{ 'border-warning' if dashboard_data.pending_users else 'border-success' }} border-4">
+      <div class="text-muted small">User access</div><div class="fs-3 fw-bold">{{ dashboard_data.pending_users }}</div><div>pending requests</div>
+    </div>{% if current_user.is_admin %}</a>{% endif %}
+  </div>
+  <div class="col-md-4"><a class="text-decoration-none text-reset" href="{{ url_for('harvest_query', crop_year=dashboard_data.year) }}">
+    <div class="main-content shadow-sm h-100 gms-card border-start {{ 'border-warning' if dashboard_data.incomplete_loads else 'border-success' }} border-4">
+      <div class="text-muted small">Needs attention</div><div class="fs-3 fw-bold">{{ dashboard_data.incomplete_loads }}</div><div>loads missing weight, moisture, or storage</div>
+    </div></a></div>
 </div>
 
 <!-- ================= KPI ROW ================= -->
