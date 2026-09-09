@@ -2271,7 +2271,7 @@ def build_reconcile_context(start_date, end_date, crop_id=""):
           JOIN Department dept ON dept.Dpt_ID=f.Dpt_ID
           JOIN Crop c ON h.Crop_ID = c.Crop_ID
           LEFT JOIN Storage_Location sl ON h.StorLoc_ID = sl.StorLoc_ID
-          LEFT JOIN Delivery d ON CAST(d.Ticket_Num AS CHAR) = h.Load_Num AND d.Grower_ID=dept.Grower_ID
+          LEFT JOIN Delivery d ON CAST(d.Ticket_Num AS BINARY) = CAST(h.Load_Num AS BINARY) AND d.Grower_ID=dept.Grower_ID
           LEFT JOIN Delivery_Location dl ON d.DelLoc_ID = dl.DelLoc_ID
           WHERE h.Harvest_Date BETWEEN %s AND %s AND dept.Grower_ID=%s
           {crop_filter_sql_h}
@@ -2301,7 +2301,7 @@ def build_reconcile_context(start_date, end_date, crop_id=""):
           FROM Delivery d
           JOIN Crop c ON d.Crop_ID = c.Crop_ID
           LEFT JOIN Delivery_Location dl ON d.DelLoc_ID = dl.DelLoc_ID
-          LEFT JOIN Harvest h ON h.Load_Num = CAST(d.Ticket_Num AS CHAR)
+          LEFT JOIN Harvest h ON CAST(h.Load_Num AS BINARY) = CAST(d.Ticket_Num AS BINARY)
           WHERE d.Delivery_Date BETWEEN %s AND %s AND d.Grower_ID=%s
           {crop_filter_sql_d}
             AND h.Harvest_ID IS NULL
