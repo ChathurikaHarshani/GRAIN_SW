@@ -1,0 +1,2 @@
+ALTER TABLE Field
+    ADD COLUMN Silage_Bu_Per_Acre DECIMAL(8,2) NULL AFTER Acres;

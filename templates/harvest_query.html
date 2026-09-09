@@ -7,10 +7,11 @@
 
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="mb-0">Harvest Loads</h1>
+    {% include "_print_report_button.html" %}
   </div>
 
   <!-- Filter bar -->
-  <form method="get" action="{{ url_for('harvest_query') }}" class="row g-2 align-items-end" id="harvest-filter-form">
+  <form method="get" action="{{ url_for('harvest_query') }}" class="row g-2 align-items-end no-print" id="harvest-filter-form">
     <div class="col-md-2">
       <label class="form-label">Year</label>
       <select class="form-select" name="crop_year" id="filter-year">
@@ -29,7 +30,7 @@
         <option value="">-- All Fields --</option>
         {% for f in fields %}
           <option value="{{ f.Field_ID }}" {% if selected_field_id|string == f.Field_ID|string %}selected{% endif %}>
-            {{ f.Field_Name }}{% if f.Crop_Year %} - {{ f.Crop_Year }}{% endif %}
+            {{ f.Field_Name }}
           </option>
         {% endfor %}
       </select>
@@ -66,9 +67,22 @@
 
   <!-- Add or edit load -->
   {% if can_edit %}
-  <h4 class="mb-3" id="harvest-load-form">
-    {% if edit_load %}Edit Harvest Load{% else %}Add Harvest Load{% endif %}
-  </h4>
+  <div class="d-flex justify-content-between align-items-center mb-3 no-print" id="harvest-load-form">
+    <h4 class="mb-0">
+      {% if edit_load %}Edit Harvest Load{% else %}Add Harvest Load{% endif %}
+    </h4>
+    <button
+      class="btn btn-sm btn-outline-secondary"
+      type="button"
+      data-bs-toggle="collapse"
+      data-bs-target="#harvest-load-entry"
+      aria-expanded="true"
+      aria-controls="harvest-load-entry">
+      Show / Hide
+    </button>
+  </div>
+
+  <div class="collapse show no-print" id="harvest-load-entry">
 
   {% if error %}
     <div class="alert alert-danger">{{ error }}</div>
@@ -76,7 +90,7 @@
 
   <form
     method="post"
-    class="row g-2"
+    class="row g-2 no-print"
     action="{{ url_for('harvest_query', field_id=selected_field_id, field_name=selected_field, storloc_id=selected_storage, crop_year=selected_year) }}">
     {% if edit_load %}
       <input type="hidden" name="harvest_id" value="{{ edit_load.Harvest_ID }}">
@@ -179,9 +193,48 @@
       {% endif %}
     </div>
   </form>
+  </div>
   {% else %}
   <div class="alert alert-info">You have Viewer access. Harvest loads are read-only.</div>
   {% endif %}
+
+  <div class="row g-3 mt-4">
+    <div class="col-md-3">
+      <div class="p-3 bg-white border rounded">
+        <div class="text-muted">MC%</div>
+        <div class="fs-4">
+          {% if mc_avg is not none %}{{ "%.1f"|format(mc_avg) }}{% else %}-{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <div class="p-3 bg-white border rounded">
+        <div class="text-muted">Lbs. Wet</div>
+        <div class="fs-4">
+          {% if lbs_wet is not none %}{{ "{:,.0f}".format(lbs_wet) }}{% else %}-{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <div class="p-3 bg-white border rounded">
+        <div class="text-muted">Bu. Wet</div>
+        <div class="fs-4">
+          {% if bu_wet is not none %}{{ "{:,.0f}".format(bu_wet) }}{% else %}-{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <div class="p-3 bg-white border rounded">
+        <div class="text-muted">Dry Bushels</div>
+        <div class="fs-4">
+          {% if dry_bushels is not none %}{{ "{:,.1f}".format(dry_bushels) }}{% else %}-{% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
 
   <hr class="my-4">
 
@@ -236,44 +289,6 @@
   {% else %}
     <p>No loads found for the selected filter.</p>
   {% endif %}
-
-  <div class="row g-3 mt-4">
-    <div class="col-md-3">
-      <div class="p-3 bg-white border rounded">
-        <div class="text-muted">MC%</div>
-        <div class="fs-4">
-          {% if mc_avg is not none %}{{ "%.1f"|format(mc_avg) }}{% else %}-{% endif %}
-        </div>
-      </div>
-    </div>
-
-    <div class="col-md-3">
-      <div class="p-3 bg-white border rounded">
-        <div class="text-muted">Lbs. Wet</div>
-        <div class="fs-4">
-          {% if lbs_wet is not none %}{{ "{:,.0f}".format(lbs_wet) }}{% else %}-{% endif %}
-        </div>
-      </div>
-    </div>
-
-    <div class="col-md-3">
-      <div class="p-3 bg-white border rounded">
-        <div class="text-muted">Bu. Wet</div>
-        <div class="fs-4">
-          {% if bu_wet is not none %}{{ "{:,.0f}".format(bu_wet) }}{% else %}-{% endif %}
-        </div>
-      </div>
-    </div>
-
-    <div class="col-md-3">
-      <div class="p-3 bg-white border rounded">
-        <div class="text-muted">Dry Bushels</div>
-        <div class="fs-4">
-          {% if dry_bushels is not none %}{{ "{:,.1f}".format(dry_bushels) }}{% else %}-{% endif %}
-        </div>
-      </div>
-    </div>
-  </div>
 
 </div>
 

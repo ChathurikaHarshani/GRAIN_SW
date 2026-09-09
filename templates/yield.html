@@ -6,42 +6,60 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="mb-0 ">Yield </h2>
 
-  <a class="btn btn-success"
-     href="{{ url_for('yield_export',
-                      crop_year=active_filters.crop_year,
-                      grower=active_filters.grower,
-                      department=active_filters.department,
-                      field=active_filters.field,
-                      crop=active_filters.crop) }}">
-    Export to Excel
-  </a>
+  <div class="d-flex gap-2 no-print">
+    {% include "_print_report_button.html" %}
+    <a class="btn btn-success"
+       href="{{ url_for('yield_export',
+                        crop_year=active_filters.crop_year,
+                        grower=active_filters.grower,
+                        department=active_filters.department,
+                        field=active_filters.field,
+                        crop=active_filters.crop) }}">
+      Export to Excel
+    </a>
+  </div>
 </div>
 
 <!-- Filters -->
-<form method="GET" class="row g-3 mb-4">
+<form method="GET" class="row g-3 mb-4 no-print">
   <div class="col-md-2">
     <label class="form-label ">Crop Year</label>
-    <input type="number" name="crop_year" class="form-control" value="{{ active_filters.crop_year }}">
+    <select name="crop_year" class="form-select">
+      <option value="">All Years</option>
+      {% for value in filter_options.crop_years %}<option value="{{ value }}" {% if active_filters.crop_year|string == value|string %}selected{% endif %}>{{ value }}</option>{% endfor %}
+    </select>
   </div>
 
   <div class="col-md-2">
     <label class="form-label ">Grower</label>
-    <input type="text" name="grower" class="form-control" value="{{ active_filters.grower }}">
+    <select name="grower" class="form-select">
+      <option value="">All Growers</option>
+      {% for value in filter_options.growers %}<option value="{{ value }}" {% if active_filters.grower == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+    </select>
   </div>
 
   <div class="col-md-2">
     <label class="form-label ">Department</label>
-    <input type="text" name="department" class="form-control" value="{{ active_filters.department }}">
+    <select name="department" class="form-select">
+      <option value="">All Departments</option>
+      {% for value in filter_options.departments %}<option value="{{ value }}" {% if active_filters.department == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+    </select>
   </div>
 
   <div class="col-md-2">
     <label class="form-label ">Field</label>
-    <input type="text" name="field" class="form-control" value="{{ active_filters.field }}">
+    <select name="field" class="form-select">
+      <option value="">All Fields</option>
+      {% for value in filter_options.fields %}<option value="{{ value }}" {% if active_filters.field == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+    </select>
   </div>
 
   <div class="col-md-2">
     <label class="form-label ">Crop</label>
-    <input type="text" name="crop" class="form-control" value="{{ active_filters.crop }}">
+    <select name="crop" class="form-select">
+      <option value="">All Crops</option>
+      {% for value in filter_options.crops %}<option value="{{ value }}" {% if active_filters.crop == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+    </select>
   </div>
 
   <div class="col-md-2 d-flex align-items-end">
@@ -49,56 +67,107 @@
   </div>
 </form>
 
-<div class="table-responsive">
-  <table id="yieldTable" class="table table-bordered table-striped table-hover align-middle">
-    <thead class="table-dark">
-      <tr>
-        <th>Crop Year</th>
-        <th>Grower</th>
-        <th>Department</th>
-        <th>Field</th>
-        <th>Crop</th>
-        <th class="text-end">Acres</th>
-        <th class="text-end">Total Bushels</th>
-        <th class="text-end">Yield (bu/ac)</th>
-        <th class="text-end">Avg MC</th>
-        <th class="text-end">Wet Bushels</th>
-        <th class="text-end">Dry Bushels</th>
-        <th class="text-end">Dry Yield (bu/ac)</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for r in results %}
-      <tr>
-        <td>{{ r.Crop_Year }}</td>
-        <td>{{ r.Grower_Name }}</td>
-        <td>{{ r.Department_Name }}</td>
-        <td>{{ r.Field_Name }}</td>
-        <td>{{ r.Crop_Name }}</td>
-        <td class="text-end">{{ r.Acres }}</td>
-        <td class="text-end">{{ r.Total_Bushels }}</td>
-        <td class="text-end"><strong>{{ r.Yield_bu_per_acre }}</strong></td>
-        <td class="text-end">{{ r.Avg_MC }}</td>
-        <td class="text-end">{{ r.Total_WetBushels }}</td>
-        <td class="text-end">{{ r.Total_DryBushels }}</td>
-        <td class="text-end"><strong>{{ r.Dry_Yield_bu_per_acre }}</strong></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+{% for section in yield_sections %}
+<section class="yield-summary-section mb-5">
+  <div class="d-flex justify-content-between align-items-baseline border-bottom border-dark mb-2">
+    <h3 class="h4 mb-1">{{ section.crop_name }}</h3>
+    <span class="text-muted">{{ section.crop_year }}</span>
+  </div>
 
-<!-- DataTables -->
-<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+  <div class="row g-4">
+    <div class="col-xl-7">
+      <div class="table-responsive">
+        <table class="table table-sm table-striped align-middle yield-field-table">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th class="text-end">Acres</th>
+              <th class="text-end">Yield</th>
+              <th class="text-end">Bushels</th>
+              <th>Hybrid/Variety</th>
+              <th>ET</th>
+              <th class="text-end">Avg MC</th>
+              <th class="text-end">Wet Bu.</th>
+              <th class="text-end">Dry Bu.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in section.rows %}
+            <tr>
+              <td>{{ r.Field_Name }}</td>
+              <td class="text-end">{{ "{:,.1f}".format(r.Acres or 0) }}</td>
+              <td class="text-end">{{ "{:,.1f}".format(r.Yield_bu_per_acre or 0) }}</td>
+              <td class="text-end">{{ "{:,.1f}".format(r.Total_Bushels or 0) }}</td>
+              <td>{{ r.Hybrid_Variety or '-' }}</td>
+              <td>{{ (r.Irr_Type[0]|upper) if r.Irr_Type else '-' }}</td>
+              <td class="text-end">{{ "{:,.2f}".format(r.Avg_MC or 0) }}</td>
+              <td class="text-end">{{ "{:,.1f}".format(r.Total_WetBushels or 0) }}</td>
+              <td class="text-end">{{ "{:,.1f}".format(r.Total_DryBushels or 0) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot class="fw-bold border-top border-dark">
+            <tr>
+              <td>Total</td>
+              <td class="text-end">{{ "{:,.1f}".format(section.total_acres) }}</td>
+              <td class="text-end">{{ "{:,.1f}".format(section.avg_yield or 0) }}</td>
+              <td class="text-end">{{ "{:,.1f}".format(section.total_bushels) }}</td>
+              <td colspan="5"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
 
-<script>
-  $(function () {
-    $('#yieldTable').DataTable({
-      pageLength: 25,
-      order: [[0, 'desc']]
-    });
-  });
-</script>
+    <aside class="col-xl-5">
+      <h4 class="h6">{{ section.crop_name }} summary</h4>
+      <div class="table-responsive mb-4">
+        <table class="table table-sm yield-summary-table">
+          <thead><tr><th>Type</th><th class="text-end">Avg Yield</th><th class="text-end">Acres</th><th class="text-end">Bushels</th></tr></thead>
+          <tbody>
+            {% for item in section.type_summary %}
+            <tr><th>{{ item.name }}</th><td class="text-end">{{ "{:,.1f}".format(item.avg_yield) if item.avg_yield is not none else '-' }}</td><td class="text-end">{{ "{:,.1f}".format(item.acres) }}</td><td class="text-end">{{ "{:,.1f}".format(item.bushels) }}</td></tr>
+            {% endfor %}
+          </tbody>
+          <tfoot class="fw-bold"><tr><th>Total</th><td class="text-end">{{ "{:,.1f}".format(section.avg_yield or 0) }}</td><td class="text-end">{{ "{:,.1f}".format(section.total_acres) }}</td><td class="text-end">{{ "{:,.1f}".format(section.total_bushels) }}</td></tr></tfoot>
+        </table>
+      </div>
+
+      <h4 class="h6">Hybrid/Variety performance</h4>
+      <div class="table-responsive mb-4">
+        <table class="table table-sm yield-summary-table">
+          <thead><tr><th>Hybrid/Variety</th><th class="text-end">Dryland</th><th class="text-end">Irrigated</th></tr></thead>
+          <tbody>{% for item in section.hybrid_summary %}<tr><td>{{ item.name }}</td><td class="text-end">{{ "{:,.1f}".format(item.Dryland) if item.Dryland is not none else '-' }}</td><td class="text-end">{{ "{:,.1f}".format(item.Irrigated) if item.Irrigated is not none else '-' }}</td></tr>{% endfor %}</tbody>
+        </table>
+      </div>
+
+      <h4 class="h6">Notes</h4>
+      {% if section.notes %}<ul class="small ps-3">{% for note in section.notes %}<li>{{ note }}</li>{% endfor %}</ul>{% else %}<p class="small text-muted">No field notes for this selection.</p>{% endif %}
+      <p class="small text-muted mb-0">Grain above each crop's base moisture is corrected to its stored moisture basis.</p>
+
+      {% if section.silage_rows %}
+      <h4 class="h6 mt-4">Silage</h4>
+      <div class="table-responsive">
+        <table class="table table-sm yield-summary-table">
+          <thead><tr><th>Silage Field</th><th>Grain Field</th><th>ET</th><th class="text-end">Acres</th><th class="text-end">Bu/ac</th><th class="text-end">Bushels</th><th>Status</th></tr></thead>
+          <tbody>
+            {% for item in section.silage_rows %}
+            <tr><td>{{ item.field_name }}</td><td>{{ item.base_field_name }}</td><td>{{ item.type[0] if item.type != 'Unspecified' else '-' }}</td><td class="text-end">{{ "{:,.2f}".format(item.acres) }}</td><td class="text-end">{{ "{:,.1f}".format(item.yield) if item.yield is not none else '-' }}</td><td class="text-end">{{ "{:,.1f}".format(item.bushels) if item.bushels is not none else '-' }}</td><td class="small {{ 'text-warning' if item.status else 'text-success' }}">{{ item.status or 'Calculated' }}</td></tr>
+            {% endfor %}
+          </tbody>
+          <tfoot class="fw-bold">
+            <tr><th colspan="5">Silage Irrigated Bu.</th><td class="text-end">{{ "{:,.1f}".format(section.silage_irrigated_bushels) if section.silage_has_irrigated else '-' }}</td><td></td></tr>
+            <tr><th colspan="5">Silage Dryland Bu.</th><td class="text-end">{{ "{:,.1f}".format(section.silage_dryland_bushels) if section.silage_has_dryland else '-' }}</td><td></td></tr>
+            {% if section.silage_has_unspecified %}<tr><th colspan="5">Silage Unspecified ET Bu.</th><td class="text-end">{{ "{:,.1f}".format(section.silage_unspecified_bushels) }}</td><td></td></tr>{% endif %}
+          </tfoot>
+        </table>
+      </div>
+      {% endif %}
+
+    </aside>
+  </div>
+</section>
+{% else %}
+<p class="text-muted">No yield records found for the selected filters.</p>
+{% endfor %}
 {% endblock %}

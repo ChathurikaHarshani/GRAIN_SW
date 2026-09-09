@@ -26,7 +26,10 @@
           <td>{{ c.Crop_Name }}</td>
           <td>{{ c.Weight_PerBushel }}</td>
           <td>{{ c.Base_MC }}</td>
-          <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('edit_crop', crop_id=c.Crop_ID) }}">Edit</a></td>
+          <td><div class="d-flex gap-2">
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('edit_crop', crop_id=c.Crop_ID) }}">Edit</a>
+            <form method="post" action="{{ url_for('delete_crop', crop_id=c.Crop_ID) }}" onsubmit="return confirm('Delete this crop? This cannot be undone.');"><button class="btn btn-sm btn-outline-danger" type="submit">Delete</button></form>
+          </div></td>
         </tr>
       {% endfor %}
       </tbody>

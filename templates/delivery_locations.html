@@ -27,7 +27,10 @@
         <tr>
           <td>{{ l.DelLoc_code }}</td>
           <td>{{ l.Location }}</td>
-          <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('edit_delivery_location', location_id=l.DelLoc_ID) }}">Edit</a></td>
+          <td><div class="d-flex gap-2">
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('edit_delivery_location', location_id=l.DelLoc_ID) }}">Edit</a>
+            <form method="post" action="{{ url_for('delete_delivery_location', location_id=l.DelLoc_ID) }}" onsubmit="return confirm('Delete this delivery location? This cannot be undone.');"><button class="btn btn-sm btn-outline-danger" type="submit">Delete</button></form>
+          </div></td>
         </tr>
       {% endfor %}
       </tbody>

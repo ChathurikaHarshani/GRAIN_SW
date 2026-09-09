@@ -19,6 +19,7 @@ import pandas as pd
 
 
 app = Flask(__name__)
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 _access_schema_ready = False
 
 
@@ -429,8 +430,8 @@ def season_setup():
             flash("Source and target crop years must be different.", "danger")
         else:
             cur.execute("""
-                INSERT INTO Field (Field_Name, Acres, Crop_Year, Irr_Type, Hybrid_Variety, Note, Dpt_ID)
-                SELECT src.Field_Name, src.Acres, %s, src.Irr_Type, src.Hybrid_Variety,
+                INSERT INTO Field (Field_Name, Acres, Silage_Bu_Per_Acre, Crop_Year, Irr_Type, Hybrid_Variety, Note, Dpt_ID)
+                SELECT src.Field_Name, src.Acres, src.Silage_Bu_Per_Acre, %s, src.Irr_Type, src.Hybrid_Variety,
                        CONCAT('Copied from ', %s, IF(src.Note IS NULL OR src.Note='', '', CONCAT(' — ', src.Note))),
                        src.Dpt_ID
                 FROM Field src JOIN Department d ON d.Dpt_ID=src.Dpt_ID
@@ -835,7 +836,7 @@ def list_fields():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
     cur.execute("""
-        SELECT f.Field_ID, f.Field_Name, f.Acres, f.Crop_Year, f.Irr_Type, f.Hybrid_Variety, f.Note,
+        SELECT f.Field_ID, f.Field_Name, f.Acres, f.Silage_Bu_Per_Acre, f.Crop_Year, f.Irr_Type, f.Hybrid_Variety, f.Note,
                d.Dpt_Name
         FROM Field f
         JOIN Department d ON f.Dpt_ID = d.Dpt_ID
@@ -854,6 +855,16 @@ def new_field():
     cur = conn.cursor(dictionary=True)
     cur.execute("SELECT Dpt_ID, Dpt_Name FROM Department WHERE Grower_ID=%s ORDER BY Dpt_Name;", (current_user.grower_id,))
     departments = cur.fetchall()
+    cur.execute("""
+        SELECT f.Field_ID, f.Field_Name, f.Acres, f.Crop_Year, f.Irr_Type,
+               f.Hybrid_Variety, f.Dpt_ID, d.Dpt_Name
+        FROM Field f
+        JOIN Department d ON f.Dpt_ID=d.Dpt_ID
+        WHERE d.Grower_ID=%s AND LOWER(f.Field_Name) NOT LIKE %s
+        ORDER BY f.Crop_Year DESC, f.Field_Name
+    """, (current_user.grower_id, "%silage%"))
+    base_fields = cur.fetchall()
+    base_field_years = sorted({field["Crop_Year"] for field in base_fields}, reverse=True)
     cur.close()
 
     if request.method == "POST":
@@ -864,8 +875,38 @@ def new_field():
         hybrid = request.form.get("hybrid_variety", "").strip()
         note = request.form.get("note", "").strip()
         dpt_id = request.form.get("dpt_id", "").strip()
+        base_field_id = request.form.get("base_field_id", "").strip()
+        silage_crop_year = request.form.get("silage_crop_year", "").strip()
+        silage_bu_per_acre = request.form.get("silage_bu_per_acre", "").strip()
 
-        if field_name and crop_year and dpt_id:
+        if base_field_id:
+            acres = request.form.get("silage_acres", "").strip()
+            base_cur = conn.cursor(dictionary=True)
+            base_cur.execute("""
+                SELECT f.Field_Name, f.Crop_Year, f.Irr_Type, f.Hybrid_Variety, f.Dpt_ID
+                FROM Field f JOIN Department d ON f.Dpt_ID=d.Dpt_ID
+                WHERE f.Field_ID=%s AND d.Grower_ID=%s
+                  AND LOWER(f.Field_Name) NOT LIKE %s
+            """, (base_field_id, current_user.grower_id, "%silage%"))
+            base_field = base_cur.fetchone()
+            base_cur.close()
+            if not base_field:
+                conn.close()
+                abort(400)
+            if not silage_crop_year or str(base_field["Crop_Year"]) != silage_crop_year:
+                conn.close()
+                return render_template(
+                    "field_form.html", departments=departments, base_fields=base_fields,
+                    base_field_years=base_field_years,
+                    error="Select a grain field from the chosen crop year."
+                )
+            field_name = f"{base_field['Field_Name']}-silage"
+            crop_year = str(base_field["Crop_Year"])
+            irr_type = base_field.get("Irr_Type") or ""
+            hybrid = base_field.get("Hybrid_Variety") or ""
+            dpt_id = str(base_field["Dpt_ID"])
+
+        if field_name and crop_year and dpt_id and (not base_field_id or (acres and silage_bu_per_acre)):
             check = conn.cursor()
             check.execute("SELECT 1 FROM Department WHERE Dpt_ID=%s AND Grower_ID=%s", (dpt_id, current_user.grower_id))
             allowed_department = check.fetchone()
@@ -873,13 +914,28 @@ def new_field():
             if not allowed_department:
                 conn.close()
                 abort(400)
+            duplicate_cur = conn.cursor()
+            duplicate_cur.execute(
+                "SELECT 1 FROM Field WHERE Field_Name=%s AND Crop_Year=%s AND Dpt_ID=%s LIMIT 1",
+                (field_name, crop_year, dpt_id)
+            )
+            duplicate = duplicate_cur.fetchone()
+            duplicate_cur.close()
+            if duplicate:
+                conn.close()
+                return render_template(
+                    "field_form.html", departments=departments, base_fields=base_fields,
+                    base_field_years=base_field_years,
+                    error=f"{field_name} already exists for crop year {crop_year}."
+                )
             cur = conn.cursor()
             cur.execute("""
-                INSERT INTO Field (Field_Name, Acres, Crop_Year, Irr_Type, Hybrid_Variety, Note, Dpt_ID)
-                VALUES (%s, %s, %s, %s, %s, %s, %s);
+                INSERT INTO Field (Field_Name, Acres, Silage_Bu_Per_Acre, Crop_Year, Irr_Type, Hybrid_Variety, Note, Dpt_ID)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
             """, (
                 field_name,
                 float(acres) if acres else None,
+                float(silage_bu_per_acre) if silage_bu_per_acre else None,
                 int(crop_year),
                 irr_type if irr_type else None,
                 hybrid if hybrid else None,
@@ -893,10 +949,11 @@ def new_field():
             return redirect(url_for("list_fields"))
 
         conn.close()
-        return render_template("field_form.html", departments=departments, error="Field Name, Crop Year, and Department are required.")
+        error = "Silage acres and Silage Bu/ac are required." if base_field_id else "Field Name, Crop Year, and Department are required."
+        return render_template("field_form.html", departments=departments, base_fields=base_fields, base_field_years=base_field_years, error=error)
 
     conn.close()
-    return render_template("field_form.html", departments=departments, error=None)
+    return render_template("field_form.html", departments=departments, base_fields=base_fields, base_field_years=base_field_years, error=None)
 
 
 @app.route("/fields/<int:field_id>/edit", methods=["GET", "POST"])
@@ -911,8 +968,8 @@ def edit_field(field_id):
         name=request.form.get("field_name","").strip(); year=request.form.get("crop_year","").strip(); dpt=request.form.get("dpt_id","").strip()
         cur.execute("SELECT 1 FROM Department WHERE Dpt_ID=%s AND Grower_ID=%s",(dpt,current_user.grower_id)); allowed=cur.fetchone()
         if name and year and dpt and allowed:
-            acres=request.form.get("acres","").strip(); irr=request.form.get("irr_type","").strip(); hybrid=request.form.get("hybrid_variety","").strip(); note=request.form.get("note","").strip()
-            cur.execute("""UPDATE Field SET Field_Name=%s,Acres=%s,Crop_Year=%s,Irr_Type=%s,Hybrid_Variety=%s,Note=%s,Dpt_ID=%s WHERE Field_ID=%s""",(name,float(acres) if acres else None,int(year),irr or None,hybrid or None,note or None,int(dpt),field_id)); conn.commit()
+            acres=request.form.get("acres","").strip(); silage_bu_per_acre=request.form.get("silage_bu_per_acre","").strip(); irr=request.form.get("irr_type","").strip(); hybrid=request.form.get("hybrid_variety","").strip(); note=request.form.get("note","").strip()
+            cur.execute("""UPDATE Field SET Field_Name=%s,Acres=%s,Silage_Bu_Per_Acre=%s,Crop_Year=%s,Irr_Type=%s,Hybrid_Variety=%s,Note=%s,Dpt_ID=%s WHERE Field_ID=%s""",(name,float(acres) if acres else None,float(silage_bu_per_acre) if silage_bu_per_acre else None,int(year),irr or None,hybrid or None,note or None,int(dpt),field_id)); conn.commit()
             cur.close(); conn.close(); flash("Field updated successfully.", "success"); return redirect(url_for("list_fields"))
         error="Field Name, Crop Year, and a valid Department are required."
     cur.close(); conn.close(); return render_template("field_form.html",field=field,departments=departments,error=error)
@@ -1232,6 +1289,96 @@ def edit_market_price(price_id):
             cur.execute("UPDATE MarketPriceMonthly SET Crop=%s,Year=%s,Month=%s,Day=%s,Market_Price=%s WHERE ID=%s AND Grower_ID=%s",(int(crop),int(year),int(month),day,float(price),price_id,current_user.grower_id)); conn.commit(); cur.close(); conn.close(); flash("Market price updated successfully.", "success"); return redirect(url_for("list_market_prices"))
         error="All fields are required."
     cur.close(); conn.close(); return render_template("market_price_form.html",price_item=price_item,crops=crops,error=error)
+
+
+# ----------------- Farm Setup: safe deletes ----------------- #
+
+def _delete_setup_record(delete_sql, params, label, redirect_endpoint):
+    """Delete one setup record, preserving records referenced by operational data."""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(delete_sql, params)
+        if cur.rowcount == 0:
+            conn.rollback()
+            abort(404)
+        conn.commit()
+        flash(f"{label} deleted successfully.", "success")
+    except pymysql.IntegrityError:
+        conn.rollback()
+        flash(
+            f"{label} cannot be deleted because it is used by other records. "
+            "Remove or reassign those records first.",
+            "danger"
+        )
+    finally:
+        cur.close()
+        conn.close()
+    return redirect(url_for(redirect_endpoint))
+
+
+@app.post("/departments/<int:dpt_id>/delete")
+@admin_required
+def delete_department(dpt_id):
+    return _delete_setup_record(
+        "DELETE FROM Department WHERE Dpt_ID=%s AND Grower_ID=%s",
+        (dpt_id, current_user.grower_id), "Department", "list_departments"
+    )
+
+
+@app.post("/fields/<int:field_id>/delete")
+@admin_required
+def delete_field(field_id):
+    return _delete_setup_record(
+        """DELETE f FROM Field f JOIN Department d ON d.Dpt_ID=f.Dpt_ID
+           WHERE f.Field_ID=%s AND d.Grower_ID=%s""",
+        (field_id, current_user.grower_id), "Field", "list_fields"
+    )
+
+
+@app.post("/carts/<int:cart_id>/delete")
+@admin_required
+def delete_cart(cart_id):
+    return _delete_setup_record(
+        "DELETE FROM Cart WHERE Cart_ID=%s AND Grower_ID=%s",
+        (cart_id, current_user.grower_id), "Cart", "list_carts"
+    )
+
+
+@app.post("/crops/<int:crop_id>/delete")
+@admin_required
+def delete_crop(crop_id):
+    return _delete_setup_record(
+        "DELETE FROM Crop WHERE Crop_ID=%s",
+        (crop_id,), "Crop", "list_crops"
+    )
+
+
+@app.post("/storage/<int:storage_id>/delete")
+@admin_required
+def delete_storage(storage_id):
+    return _delete_setup_record(
+        "DELETE FROM Storage_Location WHERE StorLoc_ID=%s AND Grower_ID=%s",
+        (storage_id, current_user.grower_id), "Storage bin", "list_storage"
+    )
+
+
+@app.post("/delivery-locations/<int:location_id>/delete")
+@admin_required
+def delete_delivery_location(location_id):
+    return _delete_setup_record(
+        "DELETE FROM Delivery_Location WHERE DelLoc_ID=%s AND Grower_ID=%s",
+        (location_id, current_user.grower_id), "Delivery location", "list_delivery_locations"
+    )
+
+
+@app.post("/market-prices/<int:price_id>/delete")
+@admin_required
+def delete_market_price(price_id):
+    return _delete_setup_record(
+        "DELETE FROM MarketPriceMonthly WHERE ID=%s AND Grower_ID=%s",
+        (price_id, current_user.grower_id), "Market price", "list_market_prices"
+    )
 
 
 
@@ -2357,12 +2504,11 @@ def billing():
     # Default: current month
     default_month_name = calendar.month_name[today.month]
 
-    month_name = request.args.get("month", default_month_name)
     delivered_to_code = request.args.get("to", (locations[0]["DelLoc_code"] if locations else ""))
     crop_code = request.args.get("crop", (crops[0]["Crop_Code"] if crops else ""))
 
     # Default start/end = selected month range (same idea as Excel)
-    month_num = _month_name_to_num(month_name) or today.month
+    month_num = _month_name_to_num(default_month_name) or today.month
     year = today.year
 
     start_default = date(year, month_num, 1)
@@ -2373,6 +2519,7 @@ def billing():
 
     start_date = date.fromisoformat(start_str)
     end_date = date.fromisoformat(end_str)
+    month_name = calendar.month_name[start_date.month]
 
     # Resolve IDs from codes (for SQL filtering)
     del_loc_id = None
@@ -2428,6 +2575,15 @@ def billing():
     totals_sum = sum(_to_float(r["Total"]) for r in rows if r["Total"] is not None)
     price_vals = [_to_float(r["Price"]) for r in rows if r.get("Price") is not None]
     avg_price = (sum(price_vals) / len(price_vals)) if price_vals else None
+    total_bushels = sum(_to_float(r.get("Bushels")) for r in rows)
+    delivered_to_name = next(
+        (loc.get("Location") for loc in locations if loc["DelLoc_code"] == delivered_to_code),
+        ""
+    )
+    crop_name = next(
+        (crop.get("Crop_Name") for crop in crops if crop["Crop_Code"] == crop_code),
+        crop_code
+    )
 
     cur.close()
     conn.close()
@@ -2435,6 +2591,7 @@ def billing():
     return render_template(
         "billing.html",
         invoice_date=today,
+        invoice_date_display=f"{today.month}/{today.day}/{today.year}",
         month_name=month_name,
         delivered_to_code=delivered_to_code,
         crop_code=crop_code,
@@ -2444,7 +2601,11 @@ def billing():
         crops=crops,
         rows=rows,
         totals_sum=totals_sum,
-        avg_price=avg_price
+        avg_price=avg_price,
+        total_bushels=total_bushels,
+        delivered_to_name=delivered_to_name,
+        crop_name=crop_name,
+        billing_year=start_date.year
     )
 
 
@@ -2478,6 +2639,23 @@ def _f(x):
         return float(x)
     return float(x)
 
+
+def _canonical_crop_name(value):
+    """Normalize equivalent crop labels used by legacy records."""
+    name = (value or "").strip()
+    if name.lower() in ("soybean", "soybeans"):
+        return "Soybeans"
+    return name
+
+
+def _silage_base_field_name(value):
+    """Return the grain field represented by a companion '-silage' field."""
+    name = (value or "").strip()
+    marker_index = name.lower().find("silage")
+    if marker_index < 0:
+        return name
+    return name[:marker_index].rstrip(" -_/").strip()
+
 @app.route("/delivery", methods=["GET"])
 @login_required
 def delivery():
@@ -2503,7 +2681,48 @@ def yield_report():
     grower      = request.args.get("grower", "").strip()
     department  = request.args.get("department", "").strip()
     field       = request.args.get("field", "").strip()
-    crop        = request.args.get("crop", "").strip()
+    crop        = _canonical_crop_name(request.args.get("crop", ""))
+
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("""
+        SELECT DISTINCT
+            fi.Crop_Year,
+            g.Grower_Name,
+            d.Dpt_Name AS Department_Name,
+            fi.Field_Name,
+            c.Crop_Name
+        FROM Harvest h
+        JOIN Field fi ON h.Field_ID = fi.Field_ID
+        JOIN Department d ON fi.Dpt_ID = d.Dpt_ID
+        JOIN Grower g ON d.Grower_ID = g.Grower_ID
+        JOIN Crop c ON h.Crop_ID = c.Crop_ID
+        WHERE g.Grower_ID=%s
+        ORDER BY fi.Crop_Year DESC, g.Grower_Name, d.Dpt_Name, fi.Field_Name, c.Crop_Name
+    """, (current_user.grower_id,))
+    filter_rows = cur.fetchall()
+
+    filter_options = {
+        "crop_years": sorted({r["Crop_Year"] for r in filter_rows if r["Crop_Year"] is not None}, reverse=True),
+        "growers": sorted({r["Grower_Name"] for r in filter_rows if r["Grower_Name"]}),
+        "departments": sorted({
+            r["Department_Name"] for r in filter_rows
+            if r["Department_Name"] and (not crop_year or str(r["Crop_Year"]) == crop_year)
+        }),
+        "fields": sorted({
+            r["Field_Name"] for r in filter_rows
+            if r["Field_Name"]
+            and (not crop_year or str(r["Crop_Year"]) == crop_year)
+            and (not department or r["Department_Name"] == department)
+        }),
+        "crops": sorted({
+            _canonical_crop_name(r["Crop_Name"]) for r in filter_rows
+            if r["Crop_Name"]
+            and (not crop_year or str(r["Crop_Year"]) == crop_year)
+            and (not department or r["Department_Name"] == department)
+            and (not field or r["Field_Name"] == field)
+        })
+    }
 
     harvest_bu_sql = calculated_bushels_sql("h", "c")
     query = """
@@ -2512,16 +2731,22 @@ def yield_report():
             g.Grower_Name,
             d.Dpt_Name AS Department_Name,
             fi.Field_Name,
-            c.Crop_Name,
+            CASE
+                WHEN LOWER(TRIM(c.Crop_Name)) IN ('soybean', 'soybeans') THEN 'Soybeans'
+                ELSE c.Crop_Name
+            END AS Crop_Name,
             fi.Acres,
+            fi.Irr_Type,
+            fi.Hybrid_Variety,
+            fi.Note,
 
-            SUM(COALESCE(""" + harvest_bu_sql + """, 0)) AS Total_Bushels,
+            ROUND(SUM(COALESCE(""" + harvest_bu_sql + """, 0)), 1) AS Total_Bushels,
             ROUND(SUM(COALESCE(""" + harvest_bu_sql + """, 0)) / NULLIF(fi.Acres, 0), 2) AS Yield_bu_per_acre,
 
             ROUND(AVG(h.MC), 2) AS Avg_MC,
 
-            SUM(COALESCE(""" + harvest_bu_sql + """, 0)) AS Total_WetBushels,
-            SUM(COALESCE(""" + harvest_bu_sql + """, 0)) AS Total_DryBushels,
+            ROUND(SUM(COALESCE(""" + harvest_bu_sql + """, 0)), 1) AS Total_WetBushels,
+            ROUND(SUM(COALESCE(""" + harvest_bu_sql + """, 0)), 1) AS Total_DryBushels,
             ROUND(SUM(COALESCE(""" + harvest_bu_sql + """, 0)) / NULLIF(fi.Acres, 0), 2) AS Dry_Yield_bu_per_acre
 
         FROM Harvest h
@@ -2541,34 +2766,142 @@ def yield_report():
         params.append(crop_year)
 
     if grower:
-        query += " AND g.Grower_Name LIKE %s"
-        params.append(f"%{grower}%")
+        query += " AND g.Grower_Name = %s"
+        params.append(grower)
 
     if department:
-        query += " AND d.Dpt_Name LIKE %s"
-        params.append(f"%{department}%")
+        query += " AND d.Dpt_Name = %s"
+        params.append(department)
 
     if field:
-        query += " AND fi.Field_Name LIKE %s"
-        params.append(f"%{field}%")
+        query += " AND fi.Field_Name = %s"
+        params.append(field)
 
     if crop:
-        query += " AND c.Crop_Name LIKE %s"
-        params.append(f"%{crop}%")
+        if crop == "Soybeans":
+            query += " AND LOWER(TRIM(c.Crop_Name)) IN ('soybean', 'soybeans')"
+        else:
+            query += " AND c.Crop_Name = %s"
+            params.append(crop)
 
     query += """
         GROUP BY
-            fi.Crop_Year, g.Grower_Name, d.Dpt_Name, fi.Field_Name, c.Crop_Name, fi.Acres
+            fi.Crop_Year, g.Grower_Name, d.Dpt_Name, fi.Field_Name,
+            CASE
+                WHEN LOWER(TRIM(c.Crop_Name)) IN ('soybean', 'soybeans') THEN 'Soybeans'
+                ELSE c.Crop_Name
+            END,
+            fi.Acres,
+            fi.Irr_Type, fi.Hybrid_Variety, fi.Note
         ORDER BY
             fi.Crop_Year DESC, g.Grower_Name, d.Dpt_Name, fi.Field_Name
     """
 
-    conn = get_conn()
-    cur = conn.cursor(dictionary=True)
     cur.execute(query, params)
     results = cur.fetchall()
+
+    silage_query = """
+        SELECT fi.Field_Name, fi.Acres, fi.Silage_Bu_Per_Acre, fi.Crop_Year, fi.Irr_Type
+        FROM Field fi
+        JOIN Department d ON fi.Dpt_ID=d.Dpt_ID
+        WHERE d.Grower_ID=%s AND LOWER(fi.Field_Name) LIKE %s
+    """
+    silage_params = [current_user.grower_id, "%silage%"]
+    if crop_year:
+        silage_query += " AND fi.Crop_Year=%s"
+        silage_params.append(crop_year)
+    if department:
+        silage_query += " AND d.Dpt_Name=%s"
+        silage_params.append(department)
+    silage_query += " ORDER BY fi.Crop_Year DESC, fi.Field_Name"
+    cur.execute(silage_query, silage_params)
+    silage_fields = cur.fetchall()
     cur.close()
     conn.close()
+
+    def irrigation_group(value):
+        text = (value or "").strip().lower()
+        if not text:
+            return "Unspecified"
+        return "Irrigated" if text.startswith("i") else "Dryland"
+
+    yield_sections = []
+    section_keys = sorted(
+        {(r["Crop_Year"], _canonical_crop_name(r["Crop_Name"])) for r in results if r.get("Crop_Name")},
+        key=lambda item: (-int(item[0]), item[1])
+    )
+    for section_year, crop_name in section_keys:
+        crop_rows = [
+            r for r in results
+            if r["Crop_Year"] == section_year and _canonical_crop_name(r["Crop_Name"]) == crop_name
+        ]
+        total_acres = sum(_f(r.get("Acres")) for r in crop_rows)
+        total_bushels = sum(_f(r.get("Total_Bushels")) for r in crop_rows)
+
+        type_summary = []
+        for group_name in ("Irrigated", "Dryland"):
+            grouped = [r for r in crop_rows if irrigation_group(r.get("Irr_Type")) == group_name]
+            acres = sum(_f(r.get("Acres")) for r in grouped)
+            bushels = sum(_f(r.get("Total_Bushels")) for r in grouped)
+            type_summary.append({
+                "name": group_name,
+                "acres": acres,
+                "bushels": bushels,
+                "avg_yield": (bushels / acres) if acres else None,
+            })
+
+        hybrid_summary = []
+        hybrids = sorted({(r.get("Hybrid_Variety") or "Unspecified").strip() for r in crop_rows})
+        for hybrid in hybrids:
+            hybrid_rows = [
+                r for r in crop_rows
+                if (r.get("Hybrid_Variety") or "Unspecified").strip() == hybrid
+            ]
+            averages = {}
+            for group_name in ("Dryland", "Irrigated"):
+                grouped = [r for r in hybrid_rows if irrigation_group(r.get("Irr_Type")) == group_name]
+                acres = sum(_f(r.get("Acres")) for r in grouped)
+                bushels = sum(_f(r.get("Total_Bushels")) for r in grouped)
+                averages[group_name] = (bushels / acres) if acres else None
+            hybrid_summary.append({"name": hybrid, **averages})
+
+        silage_rows = []
+        if crop_name.lower() == "corn":
+            for silage_field in silage_fields:
+                if silage_field["Crop_Year"] != section_year:
+                    continue
+                base_name = _silage_base_field_name(silage_field["Field_Name"])
+                silage_acres = _f(silage_field.get("Acres"))
+                silage_yield = _f(silage_field.get("Silage_Bu_Per_Acre")) if silage_field.get("Silage_Bu_Per_Acre") is not None else None
+                if silage_acres > 0:
+                    silage_rows.append({
+                        "field_name": silage_field["Field_Name"],
+                        "base_field_name": base_name,
+                        "acres": silage_acres,
+                        "yield": silage_yield,
+                        "bushels": silage_acres * silage_yield if silage_yield is not None else None,
+                        "type": irrigation_group(silage_field.get("Irr_Type")),
+                        "status": None if silage_yield is not None else f"Add Silage Bu/ac to {silage_field['Field_Name']}",
+                    })
+
+        yield_sections.append({
+            "crop_name": crop_name,
+            "crop_year": section_year,
+            "rows": crop_rows,
+            "total_acres": total_acres,
+            "total_bushels": total_bushels,
+            "avg_yield": (total_bushels / total_acres) if total_acres else None,
+            "type_summary": type_summary,
+            "hybrid_summary": hybrid_summary,
+            "silage_rows": silage_rows,
+            "silage_irrigated_bushels": sum(r["bushels"] for r in silage_rows if r["type"] == "Irrigated" and r["bushels"] is not None),
+            "silage_dryland_bushels": sum(r["bushels"] for r in silage_rows if r["type"] == "Dryland" and r["bushels"] is not None),
+            "silage_unspecified_bushels": sum(r["bushels"] for r in silage_rows if r["type"] == "Unspecified" and r["bushels"] is not None),
+            "silage_has_irrigated": any(r["type"] == "Irrigated" and r["bushels"] is not None for r in silage_rows),
+            "silage_has_dryland": any(r["type"] == "Dryland" and r["bushels"] is not None for r in silage_rows),
+            "silage_has_unspecified": any(r["type"] == "Unspecified" and r["bushels"] is not None for r in silage_rows),
+            "notes": sorted({r["Note"].strip() for r in crop_rows if r.get("Note") and r["Note"].strip()}),
+        })
 
     active_filters = {
         "crop_year": crop_year,
@@ -2578,7 +2911,13 @@ def yield_report():
         "crop": crop
     }
 
-    return render_template("yield.html", results=results, active_filters=active_filters)
+    return render_template(
+        "yield.html",
+        results=results,
+        yield_sections=yield_sections,
+        active_filters=active_filters,
+        filter_options=filter_options
+    )
 
 
 # -------------------------
@@ -2591,7 +2930,7 @@ def yield_export():
     grower      = request.args.get("grower", "").strip()
     department  = request.args.get("department", "").strip()
     field       = request.args.get("field", "").strip()
-    crop        = request.args.get("crop", "").strip()
+    crop        = _canonical_crop_name(request.args.get("crop", ""))
 
     harvest_bu_sql = calculated_bushels_sql("h", "c")
     query = """
@@ -2600,16 +2939,19 @@ def yield_export():
             g.Grower_Name,
             d.Dpt_Name AS Department_Name,
             fi.Field_Name,
-            c.Crop_Name,
+            CASE
+                WHEN LOWER(TRIM(c.Crop_Name)) IN ('soybean', 'soybeans') THEN 'Soybeans'
+                ELSE c.Crop_Name
+            END AS Crop_Name,
             fi.Acres,
 
-            SUM(COALESCE(""" + harvest_bu_sql + """, 0)) AS Total_Bushels,
+            ROUND(SUM(COALESCE(""" + harvest_bu_sql + """, 0)), 1) AS Total_Bushels,
             ROUND(SUM(COALESCE(""" + harvest_bu_sql + """, 0)) / NULLIF(fi.Acres, 0), 2) AS Yield_bu_per_acre,
 
             ROUND(AVG(h.MC), 2) AS Avg_MC,
 
-            SUM(COALESCE(""" + harvest_bu_sql + """, 0)) AS Total_WetBushels,
-            SUM(COALESCE(""" + harvest_bu_sql + """, 0)) AS Total_DryBushels,
+            ROUND(SUM(COALESCE(""" + harvest_bu_sql + """, 0)), 1) AS Total_WetBushels,
+            ROUND(SUM(COALESCE(""" + harvest_bu_sql + """, 0)), 1) AS Total_DryBushels,
             ROUND(SUM(COALESCE(""" + harvest_bu_sql + """, 0)) / NULLIF(fi.Acres, 0), 2) AS Dry_Yield_bu_per_acre
 
         FROM Harvest h
@@ -2636,12 +2978,20 @@ def yield_export():
         query += " AND fi.Field_Name LIKE %s"
         params.append(f"%{field}%")
     if crop:
-        query += " AND c.Crop_Name LIKE %s"
-        params.append(f"%{crop}%")
+        if crop == "Soybeans":
+            query += " AND LOWER(TRIM(c.Crop_Name)) IN ('soybean', 'soybeans')"
+        else:
+            query += " AND c.Crop_Name = %s"
+            params.append(crop)
 
     query += """
         GROUP BY
-            fi.Crop_Year, g.Grower_Name, d.Dpt_Name, fi.Field_Name, c.Crop_Name, fi.Acres
+            fi.Crop_Year, g.Grower_Name, d.Dpt_Name, fi.Field_Name,
+            CASE
+                WHEN LOWER(TRIM(c.Crop_Name)) IN ('soybean', 'soybeans') THEN 'Soybeans'
+                ELSE c.Crop_Name
+            END,
+            fi.Acres
         ORDER BY
             fi.Crop_Year DESC, g.Grower_Name, d.Dpt_Name, fi.Field_Name
     """

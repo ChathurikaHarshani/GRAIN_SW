@@ -152,3 +152,165 @@ body {
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }
+
+/* PDF/print layout for report pages. */
+@page { size: landscape; margin: 0.4in; }
+
+@media print {
+  body { display: block; min-height: auto; background: #fff !important; color: #000; font-size: 9pt; }
+  .navbar, footer, .no-print { display: none !important; }
+  .app-shell, .main-content, .container {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+  }
+  .table-responsive { overflow: visible !important; border: 0 !important; border-radius: 0 !important; }
+  table { width: 100% !important; font-size: 8pt; }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+  tr, .card, .row > div { break-inside: avoid; page-break-inside: avoid; }
+  .table > :not(caption) > * > * {
+    padding: 0.2rem 0.3rem;
+    color: #000 !important;
+    background: #fff !important;
+    border-color: #777 !important;
+  }
+  a { color: #000 !important; text-decoration: none !important; }
+}
+
+/* Billing invoice */
+.billing-invoice {
+  overflow: hidden;
+  border: 1px solid #d8d8d8;
+  background: #fff;
+  color: #111;
+}
+
+.billing-banner {
+  min-height: 205px;
+  padding: 26px 30px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  background: linear-gradient(8deg, #fff 0 49%, rgba(255,255,255,.25) 70%, transparent 71%),
+              linear-gradient(110deg, #fff 0 18%, #f3b4b8 48%, #d00000 78%);
+}
+
+.billing-n-logo {
+  width: 92px;
+  height: 76px;
+  color: #d71920;
+  font: 900 76px/68px Georgia, serif;
+  letter-spacing: -8px;
+  text-shadow: -2px 0 #fff, 0 2px #fff, 2px 0 #fff, 0 -2px #fff;
+}
+
+.billing-university {
+  margin-top: 22px;
+  color: #b51f24;
+  font-size: 1.55rem;
+  font-weight: 800;
+}
+
+.billing-unit { font-size: 1.2rem; font-style: italic; font-weight: 700; }
+.billing-invoice-title { color: #fff; font-size: 3.2rem; font-weight: 300; letter-spacing: .03em; }
+
+.billing-invoice-meta,
+.billing-key-details,
+.billing-notes-summary {
+  display: grid;
+  border-top: 1px solid #ddd;
+}
+
+.billing-invoice-meta { grid-template-columns: 28% 72%; min-height: 88px; align-items: center; }
+.billing-invoice-meta > div:first-child { display: flex; justify-content: space-between; padding: 0 16px 0 6px; font-size: 1.15rem; }
+.billing-description { text-align: center; font-size: 1.15rem; }
+
+.billing-key-details {
+  grid-template-columns: 18% 15% 17% 25% 25%;
+  min-height: 92px;
+  align-items: center;
+  font-size: 1.05rem;
+}
+.billing-key-details > div { padding: 8px 10px; }
+.billing-key-details > div:nth-child(2) { display: grid; gap: 5px; text-align: center; }
+.billing-destination { color: #e00000; }
+.billing-total-due { display: flex; justify-content: space-between; font-size: 1.1rem; }
+
+.billing-notes-summary { grid-template-columns: 66% 34%; padding: 10px; min-height: 132px; }
+.billing-notes { line-height: 1.65; }
+.billing-note-indent { padding-left: 38px; }
+.billing-monthly-title { text-align: center; font-size: 1.25rem; }
+.billing-monthly > div:not(.billing-monthly-title) { display: grid; grid-template-columns: 1fr 1fr 1fr; text-align: right; gap: 16px; }
+.billing-monthly > div span:first-child { text-align: left; }
+.billing-table-wrap { border: 0; border-radius: 0; }
+.billing-table { font-size: .92rem; }
+.billing-table th, .billing-table td { text-align: center; border-color: #ddd; white-space: nowrap; }
+.billing-table thead { border-top: 1px solid #333; border-bottom: 1px solid #333; }
+.billing-group-head th { border: 0; font-size: 1.05rem; padding-bottom: .15rem; }
+
+@media print {
+  .billing-invoice { border: 0 !important; }
+  .billing-banner {
+    min-height: auto;
+    padding: 0 0 .12in;
+    align-items: center;
+    background: #fff !important;
+    border-bottom: 2px solid #222;
+  }
+  .billing-n-logo { display: none; }
+  .billing-university { margin-top: 0; color: #111; font-size: 15pt; }
+  .billing-unit { font-size: 10pt; font-style: normal; }
+  .billing-invoice-title { color: #111; font-size: 24pt; font-weight: 600; }
+  .billing-invoice-meta { min-height: .65in; }
+  .billing-key-details { min-height: .68in; }
+  .billing-notes-summary { min-height: .92in; }
+  .billing-table, .billing-table table { font-size: 7.5pt; }
+  .billing-table th, .billing-table td { padding: .08in .045in !important; }
+}
+
+/* Yield summary layout */
+.yield-summary-section {
+  padding: 1rem;
+  border: 1px solid rgba(0, 0, 0, .12);
+  border-radius: .75rem;
+  background: #fff;
+}
+
+.yield-field-table,
+.yield-summary-table {
+  font-size: .88rem;
+}
+
+.yield-field-table thead,
+.yield-summary-table thead {
+  border-bottom: 1px solid #333;
+}
+
+@media print {
+  .yield-summary-section {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    break-before: page;
+    page-break-before: always;
+  }
+  .yield-summary-section:first-of-type {
+    break-before: auto;
+    page-break-before: auto;
+  }
+  .yield-summary-section .row > div,
+  .yield-summary-section aside {
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+  .yield-field-table,
+  .yield-summary-table {
+    font-size: 7pt;
+  }
+}
