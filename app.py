@@ -2247,17 +2247,17 @@ def build_reconcile_context(start_date, end_date, crop_id=""):
     cur.execute(f"""
         (
           SELECT
-            h.Load_Num AS load_key,
+            CONVERT(h.Load_Num USING utf8mb4) COLLATE utf8mb4_unicode_ci AS load_key,
             h.Harvest_Date AS harvest_date,
-            f.Field_Name AS field_name,
-            sl.Bin_Name AS harvest_storage,
-            c.Crop_Code AS crop_code,
+            CONVERT(f.Field_Name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS field_name,
+            CONVERT(sl.Bin_Name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS harvest_storage,
+            CONVERT(c.Crop_Code USING utf8mb4) COLLATE utf8mb4_unicode_ci AS crop_code,
             h.MC AS harvest_mc,
             h.Gross_Weight AS harvest_gross,
             h.Tare_Weight AS harvest_tare,
             {harvest_bu_sql} AS harvest_bushels,
             d.Delivery_Date AS delivery_date,
-            dl.DelLoc_code AS delivered_to,
+            CONVERT(dl.DelLoc_code USING utf8mb4) COLLATE utf8mb4_unicode_ci AS delivered_to,
             d.MC AS delivery_mc,
             d.Gross_Weight AS delivery_gross,
             d.Tare_Weight AS delivery_tare,
@@ -2279,17 +2279,17 @@ def build_reconcile_context(start_date, end_date, crop_id=""):
         UNION
         (
           SELECT
-            CAST(d.Ticket_Num AS CHAR) AS load_key,
+            CONVERT(CAST(d.Ticket_Num AS CHAR) USING utf8mb4) COLLATE utf8mb4_unicode_ci AS load_key,
             NULL AS harvest_date,
             NULL AS field_name,
             NULL AS harvest_storage,
-            c.Crop_Code AS crop_code,
+            CONVERT(c.Crop_Code USING utf8mb4) COLLATE utf8mb4_unicode_ci AS crop_code,
             NULL AS harvest_mc,
             NULL AS harvest_gross,
             NULL AS harvest_tare,
             NULL AS harvest_bushels,
             d.Delivery_Date AS delivery_date,
-            dl.DelLoc_code AS delivered_to,
+            CONVERT(dl.DelLoc_code USING utf8mb4) COLLATE utf8mb4_unicode_ci AS delivered_to,
             d.MC AS delivery_mc,
             d.Gross_Weight AS delivery_gross,
             d.Tare_Weight AS delivery_tare,
