@@ -68,6 +68,19 @@
     </div>
   </div>
 
+  {% if stored_price_count %}
+    <div class="alert alert-info" role="alert">
+      Using saved delivery prices for {{ stored_price_count }} load(s) without monthly market prices.
+      These prices are unchanged. Add monthly market prices to calculate the $0.04 adjustment and HMC discount.
+    </div>
+  {% endif %}
+  {% if missing_price_count %}
+    <div class="alert alert-warning" role="alert">
+      No monthly market price or saved delivery price is available for {{ missing_price_count }} load(s).
+      Total Due is incomplete. Add the missing market prices before issuing this invoice.
+    </div>
+  {% endif %}
+
   <section class="billing-invoice">
     <header class="billing-banner">
       <div>
@@ -90,7 +103,7 @@
       <div><span>{{ billing_year }}</span><strong>{{ crop_name }}</strong></div>
       <div><strong>ARDC Delivery To:</strong></div>
       <div class="billing-destination"><strong>{{ delivered_to_name or delivered_to_code }} ({{ delivered_to_code }})</strong></div>
-      <div class="billing-total-due"><strong>Total Due:</strong><strong>${{ "{:,.2f}".format(totals_sum or 0) }}</strong></div>
+      <div class="billing-total-due"><strong>Total Due:</strong><strong>{% if missing_price_count %}Incomplete{% else %}${{ "{:,.2f}".format(totals_sum or 0) }}{% endif %}</strong></div>
     </div>
 
     <div class="billing-notes-summary">
@@ -103,7 +116,7 @@
       <div class="billing-monthly">
         <div class="billing-monthly-title">Monthly</div>
         <div><span>{{ month_name }}</span><strong>Price</strong><strong>Bushels</strong></div>
-        <div><span></span><span>${{ "{:,.2f}".format(avg_price or 0) }}</span><span>{{ "{:,.1f}".format(total_bushels or 0) }}</span></div>
+        <div><span></span><span>{% if avg_price is not none %}${{ "{:,.2f}".format(avg_price) }}{% else %}Unavailable{% endif %}</span><span>{{ "{:,.1f}".format(total_bushels or 0) }}</span></div>
       </div>
     </div>
 

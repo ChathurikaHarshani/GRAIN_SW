@@ -54,6 +54,8 @@ ALTER TABLE Harvest
 Run
 ---
 python import_grc.py
+python import_grc.py --year 2026
+python import_grc.py --from-date 2026-01-01
 python import_grc.py 93438245
 python import_grc.py 93438245 93438246 93438247
 python import_grc.py 93438245-93438260
@@ -61,6 +63,7 @@ python import_grc.py 93438245-93438260
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import sys
@@ -135,6 +138,11 @@ def normalize_crop_name(crop_name: Optional[str]) -> str:
     lookup = {
         "soybean": "Soybeans",
         "soybeans": "Soybeans",
+        "b": "Soybeans",
+        "sb": "Soybeans",
+        "hmc": "High Moisture Corn",
+        "high moisture corn": "High Moisture Corn",
+        "high-moisture corn": "High Moisture Corn",
         "corn": "Corn",
         "maize": "Corn",
         "milo": "Milo",
@@ -299,17 +307,40 @@ def get_or_create_crop(conn, crop_name: str) -> int:
     crop_name = normalize_crop_name(crop_name)
 
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT Crop_ID FROM Crop WHERE Crop_Name = %s",
-            (crop_name,)
-        )
+        # Prefer the retained crop codes; accept legacy names/codes without
+        # modifying any existing crop or historical load records.
+        aliases = {
+            "Soybeans": ("B", ("B", "SB"), ("soybean", "soybeans")),
+            "High Moisture Corn": (
+                "HMC", ("HMC",), ("hmc", "high moisture corn", "high-moisture corn")
+            ),
+        }
+        if crop_name in aliases:
+            preferred_code, codes, names = aliases[crop_name]
+            code_slots = ", ".join(["%s"] * len(codes))
+            name_slots = ", ".join(["%s"] * len(names))
+            cur.execute(
+                f"""SELECT Crop_ID FROM Crop
+                    WHERE UPPER(TRIM(Crop_Code)) IN ({code_slots})
+                       OR LOWER(TRIM(Crop_Name)) IN ({name_slots})
+                    ORDER BY CASE WHEN UPPER(TRIM(Crop_Code)) = %s THEN 0 ELSE 1 END,
+                             Crop_ID
+                    LIMIT 1""",
+                (*codes, *names, preferred_code),
+            )
+        else:
+            cur.execute(
+                "SELECT Crop_ID FROM Crop WHERE Crop_Name = %s",
+                (crop_name,)
+            )
         row = cur.fetchone()
         if row:
             return row["Crop_ID"]
 
         defaults = {
             "Corn": ("C", 56.00, 15.50),
-            "Soybeans": ("SB", 60.00, 13.00),
+            "Soybeans": ("B", 60.00, 13.00),
+            "High Moisture Corn": ("HMC", 56.00, 15.50),
             "Milo": ("M", 56.00, 14.00),
             "Unknown": ("UNK", 60.00, 13.00),
         }
@@ -417,6 +448,8 @@ def insert_harvest_load(
     source_file_id: int,
     source_file_name: str,
     row_num: int,
+    filter_year: Optional[int] = None,
+    from_date: Optional[datetime.date] = None,
 ) -> str:
     grower_name = (header.get("grower") or "").strip()
     farm_name = (header.get("farm") or "").strip()
@@ -464,6 +497,14 @@ def insert_harvest_load(
         crop_year = int(header_crop_year)
     else:
         return "SKIPPED: missing year and load date"
+
+    if filter_year is not None and crop_year != filter_year:
+        return f"SKIPPED: outside requested year {filter_year}"
+    if from_date is not None:
+        if harvest_date is None:
+            return f"SKIPPED: missing load date for from-date {from_date.isoformat()}"
+        if harvest_date < from_date:
+            return f"SKIPPED: before requested date {from_date.isoformat()}"
 
     if not grower_name:
         return "SKIPPED: missing grower"
@@ -624,7 +665,10 @@ def insert_harvest_load(
     return "IMPORTED"
 
 
-def import_all_graincart_files():
+def import_all_graincart_files(
+    filter_year: Optional[int] = None,
+    from_date: Optional[datetime.date] = None,
+):
     client = SlingshotClient()
     conn = pymysql.connect(**DB_CONFIG)
 
@@ -668,6 +712,8 @@ def import_all_graincart_files():
                         source_file_id=file_id,
                         source_file_name=file_name,
                         row_num=row_num,
+                        filter_year=filter_year,
+                        from_date=from_date,
                     )
 
                     if status == "IMPORTED":
@@ -702,7 +748,11 @@ def import_all_graincart_files():
         conn.close()
 
 
-def import_graincart_file_by_id(file_id: int):
+def import_graincart_file_by_id(
+    file_id: int,
+    filter_year: Optional[int] = None,
+    from_date: Optional[datetime.date] = None,
+):
     client = SlingshotClient()
     conn = pymysql.connect(**DB_CONFIG)
 
@@ -732,6 +782,8 @@ def import_graincart_file_by_id(file_id: int):
                 source_file_id=file_id,
                 source_file_name=file_name,
                 row_num=row_num,
+                filter_year=filter_year,
+                from_date=from_date,
             )
 
             if status == "IMPORTED":
@@ -754,7 +806,11 @@ def import_graincart_file_by_id(file_id: int):
         conn.close()
 
 
-def import_graincart_files_by_ids(file_ids: Iterable[int]):
+def import_graincart_files_by_ids(
+    file_ids: Iterable[int],
+    filter_year: Optional[int] = None,
+    from_date: Optional[datetime.date] = None,
+):
     unique_ids: List[int] = []
     seen = set()
     for file_id in file_ids:
@@ -783,7 +839,7 @@ def import_graincart_files_by_ids(file_ids: Iterable[int]):
             print(f"[{index}/{total}] Skipping file with missing ID")
             continue
         print(f"[{index}/{total}] Importing file ID {file_id}")
-        import_graincart_file_by_id(file_id)
+        import_graincart_file_by_id(file_id, filter_year=filter_year, from_date=from_date)
 
 
 def parse_file_id_tokens(tokens: List[str]) -> List[int]:
@@ -812,8 +868,28 @@ def parse_file_id_tokens(tokens: List[str]) -> List[int]:
     return file_ids
 
 
+def parse_cli_args(argv: List[str]):
+    parser = argparse.ArgumentParser(description="Import Raven Slingshot grain cart data into GMS.")
+    parser.add_argument("file_ids", nargs="*", help="Optional Slingshot file IDs, comma lists, or ranges.")
+    parser.add_argument("--year", type=int, dest="filter_year", help="Only import loads for this crop/load year.")
+    parser.add_argument("--from-date", dest="from_date", help="Only import loads on or after this date, YYYY-MM-DD.")
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        import_graincart_files_by_ids(parse_file_id_tokens(sys.argv[1:]))
+    args = parse_cli_args(sys.argv[1:])
+    parsed_from_date = safe_date(args.from_date) if args.from_date else None
+    if args.from_date and parsed_from_date is None:
+        raise ValueError("--from-date must use YYYY-MM-DD or another supported date format.")
+
+    if args.file_ids:
+        import_graincart_files_by_ids(
+            parse_file_id_tokens(args.file_ids),
+            filter_year=args.filter_year,
+            from_date=parsed_from_date,
+        )
     else:
-        import_all_graincart_files()
+        import_all_graincart_files(
+            filter_year=args.filter_year,
+            from_date=parsed_from_date,
+        )

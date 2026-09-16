@@ -58,6 +58,7 @@
     <label class="form-label ">Crop</label>
     <select name="crop" class="form-select">
       <option value="">All Crops</option>
+      <option value="Corn/HMC" {% if active_filters.crop == "Corn/HMC" %}selected{% endif %}>Corn/HMC (combined)</option>
       {% for value in filter_options.crops %}<option value="{{ value }}" {% if active_filters.crop == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
     </select>
   </div>

@@ -1,14 +1,15 @@
 from flask import Flask, render_template, jsonify, request, redirect, url_for, session, abort, send_file, flash
 from db import get_conn
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import calendar
+import re
 from functools import wraps
 from dotenv import load_dotenv
 import os
 import bcrypt
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
-import pymysql
+from mysql.connector import IntegrityError
 from io import BytesIO
 import pandas as pd
 #from slingshot_client import main as run_slingshot_import
@@ -603,14 +604,15 @@ def dashboard():
     inventory_rows, _, _ = build_inventory_snapshot(crop_year=str(dashboard_year))
     inventory_by_location = {}
     for row in inventory_rows:
-        location = row.get("Bin_Name") or "Unassigned"
+        location = row.get("Bin_Code") or row.get("Bin_Name") or "Unassigned"
         inventory_by_location[location] = inventory_by_location.get(location, 0.0) + _to_float(row.get("Current_Bu"))
 
     top_inventory = sorted(
-        inventory_by_location.items(),
-        key=lambda item: abs(item[1]),
+        ((location, max(0.0, bushels)) for location, bushels in inventory_by_location.items()),
+        key=lambda item: item[1],
         reverse=True
     )[:8]
+    top_inventory.sort(key=lambda item: storage_sort_key(item[0]))
 
     month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     monthly_bushels = [0.0] * 12
@@ -1088,6 +1090,12 @@ def edit_crop(crop_id):
 
 # ----------------- Storage Location: list + create ----------------- #
 
+def storage_sort_key(code):
+    """Sort numeric portions as numbers, so Bin2 precedes Bin10."""
+    return tuple((1, int(part)) if part.isdigit() else (0, part)
+                 for part in re.split(r"(\d+)", (code or "").strip().casefold()))
+
+
 @app.route("/storage")
 @admin_required
 def list_storage():
@@ -1098,7 +1106,7 @@ def list_storage():
                Legal_Desc, Lattitude, Lontitude, Manufacture
         FROM Storage_Location WHERE Grower_ID=%s ORDER BY Bin_Name;
     """, (current_user.grower_id,))
-    rows = cur.fetchall()
+    rows = sorted(cur.fetchall(), key=lambda row: storage_sort_key(row.get("Bin_Code") or row.get("Bin_Name")))
     cur.close()
     conn.close()
     return render_template("storage.html", storage=rows)
@@ -1304,7 +1312,7 @@ def _delete_setup_record(delete_sql, params, label, redirect_endpoint):
             abort(404)
         conn.commit()
         flash(f"{label} deleted successfully.", "success")
-    except pymysql.IntegrityError:
+    except IntegrityError:
         conn.rollback()
         flash(
             f"{label} cannot be deleted because it is used by other records. "
@@ -1339,6 +1347,32 @@ def delete_field(field_id):
 @app.post("/carts/<int:cart_id>/delete")
 @admin_required
 def delete_cart(cart_id):
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """SELECT c.Cart_ID, COUNT(h.Harvest_ID) AS harvest_uses
+               FROM Cart c
+               LEFT JOIN Harvest h ON h.Cart_ID=c.Cart_ID
+               WHERE c.Cart_ID=%s AND c.Grower_ID=%s
+               GROUP BY c.Cart_ID""",
+            (cart_id, current_user.grower_id)
+        )
+        cart = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+
+    if not cart:
+        abort(404)
+    if cart["harvest_uses"]:
+        flash(
+            f"Cart cannot be deleted because it is used by "
+            f"{cart['harvest_uses']} harvest record(s). Reassign those records first.",
+            "danger"
+        )
+        return redirect(url_for("list_carts"))
+
     return _delete_setup_record(
         "DELETE FROM Cart WHERE Cart_ID=%s AND Grower_ID=%s",
         (cart_id, current_user.grower_id), "Cart", "list_carts"
@@ -1570,6 +1604,7 @@ def harvest_query():
     selected_storage = request.args.get("storloc_id", "").strip()
     selected_year = request.args.get("crop_year", "").strip()
     selected_edit_id = request.args.get("edit_id", "").strip()
+    needs_attention = request.args.get("needs_attention", "") == "1"
 
     # ---------------- Dropdown data ----------------
     field_filter_where = ["d.Grower_ID = %s"]
@@ -1599,8 +1634,8 @@ def harvest_query():
         if not selected_field_matches_year:
             selected_field_id = ""
 
-    cur.execute("SELECT StorLoc_ID, Bin_Name FROM Storage_Location WHERE Grower_ID=%s ORDER BY Bin_Name;", (current_user.grower_id,))
-    storages = cur.fetchall()
+    cur.execute("SELECT StorLoc_ID, Bin_Code, Bin_Name FROM Storage_Location WHERE Grower_ID=%s ORDER BY Bin_Code;", (current_user.grower_id,))
+    storages = sorted(cur.fetchall(), key=lambda row: storage_sort_key(row.get("Bin_Code") or row.get("Bin_Name")))
 
 
 
@@ -1770,7 +1805,8 @@ def harvest_query():
                     field_id=selected_field_id,
                     field_name=selected_field,
                     storloc_id=selected_storage,
-                    crop_year=selected_year
+                    crop_year=selected_year,
+                    needs_attention="1" if needs_attention else ""
                 ))
 
     # ---------------- GET: show filtered loads ----------------
@@ -1792,6 +1828,9 @@ def harvest_query():
         where.append("f.Crop_Year = %s")
         params.append(selected_year)
 
+    if needs_attention:
+        where.append("(h.Gross_Weight IS NULL OR h.MC IS NULL OR h.StorLoc_ID IS NULL)")
+
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
     cur.execute(f"""
@@ -1808,7 +1847,7 @@ def harvest_query():
           h.MC,
           h.Gross_Weight,
           h.Tare_Weight,
-          s.Bin_Name AS Storage,
+          COALESCE(NULLIF(s.Bin_Code, ''), s.Bin_Name) AS Storage,
           h.Bushels,
           h.Note
         FROM Harvest h
@@ -1887,6 +1926,7 @@ def harvest_query():
         selected_field_id=selected_field_id,
         selected_storage=selected_storage,
         selected_year=selected_year,
+        needs_attention=needs_attention,
         error=error,
         mc_avg=mc_avg,
         lbs_wet=lbs_wet,
@@ -2250,7 +2290,7 @@ def build_reconcile_context(start_date, end_date, crop_id=""):
             CONVERT(h.Load_Num USING utf8mb4) COLLATE utf8mb4_unicode_ci AS load_key,
             h.Harvest_Date AS harvest_date,
             CONVERT(f.Field_Name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS field_name,
-            CONVERT(sl.Bin_Name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS harvest_storage,
+            CONVERT(COALESCE(NULLIF(sl.Bin_Code, ''), sl.Bin_Name) USING utf8mb4) COLLATE utf8mb4_unicode_ci AS harvest_storage,
             CONVERT(c.Crop_Code USING utf8mb4) COLLATE utf8mb4_unicode_ci AS crop_code,
             h.MC AS harvest_mc,
             h.Gross_Weight AS harvest_gross,
@@ -2352,6 +2392,16 @@ def build_reconcile_context(start_date, end_date, crop_id=""):
     }
 
 
+INVENTORY_CROP_SQL = """CASE
+    WHEN LOWER(TRIM(c.Crop_Name)) IN ('soybean', 'soybeans')
+         OR UPPER(TRIM(c.Crop_Code)) IN ('B', 'SB') THEN 'Soybeans'
+    WHEN LOWER(TRIM(c.Crop_Name)) IN ('hmc', 'high moisture corn')
+         OR UPPER(TRIM(c.Crop_Code)) = 'HMC' THEN 'High Moisture Corn'
+    WHEN LOWER(TRIM(c.Crop_Name)) = 'corn'
+         OR UPPER(TRIM(c.Crop_Code)) = 'C' THEN 'Corn'
+    ELSE NULLIF(TRIM(c.Crop_Name), '') END"""
+
+
 def build_inventory_snapshot(crop_year="", crop_name=""):
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -2361,8 +2411,9 @@ def build_inventory_snapshot(crop_year="", crop_name=""):
     harvest_q = """
         SELECT
             s.StorLoc_ID,
+            s.Bin_Code,
             s.Bin_Name,
-            c.Crop_Name,
+            """ + INVENTORY_CROP_SQL + """ AS Crop_Name,
             SUM(COALESCE(""" + harvest_bu_sql + """, 0)) AS Harvest_Bu,
             CASE
               WHEN SUM(COALESCE(""" + harvest_bu_sql + """, 0)) = 0 THEN NULL
@@ -2382,12 +2433,12 @@ def build_inventory_snapshot(crop_year="", crop_name=""):
         params.append(crop_year)
 
     if crop_name:
-        harvest_q += " AND c.Crop_Name LIKE %s"
-        params.append(f"%{crop_name}%")
+        harvest_q += " AND (" + INVENTORY_CROP_SQL + ") = %s"
+        params.append(crop_name)
 
     harvest_q += """
-        GROUP BY s.StorLoc_ID, s.Bin_Name, c.Crop_Name
-        ORDER BY s.Bin_Name, c.Crop_Name
+        GROUP BY s.StorLoc_ID, s.Bin_Code, s.Bin_Name, """ + INVENTORY_CROP_SQL + """
+        ORDER BY s.Bin_Code, Crop_Name
     """
     cur.execute(harvest_q, params)
     harvest_rows = cur.fetchall()
@@ -2395,8 +2446,9 @@ def build_inventory_snapshot(crop_year="", crop_name=""):
     delivery_q = """
         SELECT
             s.StorLoc_ID,
+            s.Bin_Code,
             s.Bin_Name,
-            c.Crop_Name,
+            """ + INVENTORY_CROP_SQL + """ AS Crop_Name,
             SUM(COALESCE(""" + delivery_bu_sql + """, 0)) AS Delivered_Bu
         FROM Storage_Location s
         LEFT JOIN Delivery d ON d.StorLoc_ID = s.StorLoc_ID
@@ -2406,14 +2458,17 @@ def build_inventory_snapshot(crop_year="", crop_name=""):
     delivery_params = [current_user.grower_id, current_user.grower_id]
 
     if crop_name:
-        delivery_q += " AND c.Crop_Name LIKE %s"
-        delivery_params.append(f"%{crop_name}%")
+        delivery_q += " AND (" + INVENTORY_CROP_SQL + ") = %s"
+        delivery_params.append(crop_name)
 
     delivery_q += """
-        GROUP BY s.StorLoc_ID, c.Crop_Name
+        GROUP BY s.StorLoc_ID, s.Bin_Code, s.Bin_Name, """ + INVENTORY_CROP_SQL + """
     """
     cur.execute(delivery_q, delivery_params)
-    delivery_rows = cur.fetchall()
+    # A left join emits an empty placeholder for bins with no deliveries.
+    # Harvest already supplies empty-bin rows; do not add a duplicate crop row.
+    delivery_rows = [r for r in cur.fetchall()
+                     if r["Crop_Name"] is not None or r["Delivered_Bu"]]
 
     cur.close()
     conn.close()
@@ -2433,6 +2488,7 @@ def build_inventory_snapshot(crop_year="", crop_name=""):
         harvest_bu = float(row["Harvest_Bu"] or 0)
         delivered_bu = delivered_map.get(key, 0.0)
         inventory_rows.append({
+            "Bin_Code": row["Bin_Code"],
             "Bin_Name": row["Bin_Name"],
             "Note": None,
             "Crop_Name": crop_label,
@@ -2449,6 +2505,7 @@ def build_inventory_snapshot(crop_year="", crop_name=""):
             continue
         delivered_bu = float(row["Delivered_Bu"] or 0)
         inventory_rows.append({
+            "Bin_Code": row["Bin_Code"],
             "Bin_Name": row["Bin_Name"],
             "Note": None,
             "Crop_Name": crop_label,
@@ -2458,7 +2515,7 @@ def build_inventory_snapshot(crop_year="", crop_name=""):
             "Current_Bu": round(-delivered_bu, 2),
         })
 
-    inventory_rows.sort(key=lambda x: ((x["Bin_Name"] or ""), (x["Crop_Name"] or "")))
+    inventory_rows.sort(key=lambda x: (storage_sort_key(x["Bin_Code"] or x["Bin_Name"]), (x["Crop_Name"] or "")))
 
     summary = {}
     for row in inventory_rows:
@@ -2483,6 +2540,15 @@ def build_inventory_snapshot(crop_year="", crop_name=""):
         corn_split[label]["Inventory"] += row["Current_Bu"]
 
     return inventory_rows, summary, corn_split
+
+def invoice_unit_price(monthly_average, is_hmc=False):
+    if monthly_average is None:
+        return None
+    price = Decimal(str(monthly_average)) + Decimal("0.04")
+    if is_hmc:
+        price *= Decimal("0.95")
+    return price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
 
 @app.route("/billing", methods=["GET"])
 @admin_required
@@ -2545,11 +2611,13 @@ def billing():
           d.Ticket_Num        AS Load_Num,
           d.Delivery_Date     AS Delivery_Date,
           c.Crop_Code         AS Crop,
+          c.Crop_ID           AS Crop_ID,
+          c.Crop_Name         AS Crop_Name,
           dl.DelLoc_code      AS ToCode,
           d.MC                AS MC,
           d.Gross_Weight      AS Gross,
           d.Tare_Weight       AS Tare,
-          sl.Bin_Name         AS Storage,
+          COALESCE(NULLIF(sl.Bin_Code, ''), sl.Bin_Name) AS Storage,
           """ + delivery_bu_sql + """ AS Bushels,
           d.Price             AS Price
         FROM Delivery d
@@ -2564,17 +2632,43 @@ def billing():
 
     rows = cur.fetchall()
 
-    # Compute Total column like Excel: Total = Bushels * Price
+    # Use unadjusted market averages, not previously billed delivery prices.
+    cur.execute("""
+        SELECT Crop, Year, Month, AVG(Market_Price) AS average_price
+        FROM MarketPriceMonthly
+        WHERE Grower_ID=%s
+          AND (Year * 100 + Month) BETWEEN %s AND %s
+        GROUP BY Crop, Year, Month
+    """, (current_user.grower_id, start_date.year * 100 + start_date.month,
+          end_date.year * 100 + end_date.month))
+    market_prices = {
+        (r["Crop"], int(r["Year"]), int(r["Month"])): r["average_price"]
+        for r in cur.fetchall()
+    }
+    corn_id = next((c["Crop_ID"] for c in crops
+                    if (c.get("Crop_Code") or "").upper() == "C"
+                    or (c.get("Crop_Name") or "").lower() == "corn"), None)
     for r in rows:
-        bus = _to_float(r.get("Bushels"))
-        price = r.get("Price")
-        price_val = _to_float(price) if price is not None else None
-        r["Total"] = (bus * price_val) if price_val is not None else None
+        is_hmc = ((r.get("Crop") or "").upper() == "HMC"
+                  or (r.get("Crop_Name") or "").lower() in ("hmc", "high moisture corn"))
+        price_crop_id = corn_id if is_hmc else r["Crop_ID"]
+        delivery_date = r["Delivery_Date"]
+        monthly_average = market_prices.get((price_crop_id, delivery_date.year, delivery_date.month))
+        r["Uses_Stored_Price"] = monthly_average is None and r.get("Price") is not None
+        # Historical delivery prices may already include billing adjustments.
+        # Preserve them when no source average exists; never apply the markup twice.
+        r["Price"] = (Decimal(str(r["Price"])) if r["Uses_Stored_Price"]
+                      else invoice_unit_price(monthly_average, is_hmc))
+        r["Total"] = (
+            (Decimal(str(r.get("Bushels") or 0)) * r["Price"]).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if r["Price"] is not None else None
+        )
 
-    # Summary (Excel: Total & Avg Price)
-    totals_sum = sum(_to_float(r["Total"]) for r in rows if r["Total"] is not None)
-    price_vals = [_to_float(r["Price"]) for r in rows if r.get("Price") is not None]
+    totals_sum = sum((r["Total"] for r in rows if r["Total"] is not None), Decimal("0"))
+    price_vals = [r["Price"] for r in rows if r["Price"] is not None]
     avg_price = (sum(price_vals) / len(price_vals)) if price_vals else None
+    missing_price_count = sum(r["Price"] is None for r in rows)
     total_bushels = sum(_to_float(r.get("Bushels")) for r in rows)
     delivered_to_name = next(
         (loc.get("Location") for loc in locations if loc["DelLoc_code"] == delivered_to_code),
@@ -2602,6 +2696,8 @@ def billing():
         rows=rows,
         totals_sum=totals_sum,
         avg_price=avg_price,
+        missing_price_count=missing_price_count,
+        stored_price_count=sum(r["Uses_Stored_Price"] for r in rows),
         total_bushels=total_bushels,
         delivered_to_name=delivered_to_name,
         crop_name=crop_name,
@@ -2725,16 +2821,17 @@ def yield_report():
     }
 
     harvest_bu_sql = calculated_bushels_sql("h", "c")
+    yield_crop_sql = "'Corn/HMC'" if crop == "Corn/HMC" else """CASE
+                WHEN LOWER(TRIM(c.Crop_Name)) IN ('soybean', 'soybeans') THEN 'Soybeans'
+                ELSE c.Crop_Name
+            END"""
     query = """
         SELECT
             fi.Crop_Year AS Crop_Year,
             g.Grower_Name,
             d.Dpt_Name AS Department_Name,
             fi.Field_Name,
-            CASE
-                WHEN LOWER(TRIM(c.Crop_Name)) IN ('soybean', 'soybeans') THEN 'Soybeans'
-                ELSE c.Crop_Name
-            END AS Crop_Name,
+            """ + yield_crop_sql + """ AS Crop_Name,
             fi.Acres,
             fi.Irr_Type,
             fi.Hybrid_Variety,
@@ -2778,7 +2875,9 @@ def yield_report():
         params.append(field)
 
     if crop:
-        if crop == "Soybeans":
+        if crop == "Corn/HMC":
+            query += " AND (UPPER(TRIM(c.Crop_Code)) IN ('C', 'HMC') OR LOWER(TRIM(c.Crop_Name)) IN ('corn', 'hmc', 'high moisture corn'))"
+        elif crop == "Soybeans":
             query += " AND LOWER(TRIM(c.Crop_Name)) IN ('soybean', 'soybeans')"
         else:
             query += " AND c.Crop_Name = %s"
@@ -2786,11 +2885,8 @@ def yield_report():
 
     query += """
         GROUP BY
-            fi.Crop_Year, g.Grower_Name, d.Dpt_Name, fi.Field_Name,
-            CASE
-                WHEN LOWER(TRIM(c.Crop_Name)) IN ('soybean', 'soybeans') THEN 'Soybeans'
-                ELSE c.Crop_Name
-            END,
+            fi.Field_ID, fi.Crop_Year, g.Grower_Name, d.Dpt_Name, fi.Field_Name,
+            """ + yield_crop_sql + """,
             fi.Acres,
             fi.Irr_Type, fi.Hybrid_Variety, fi.Note
         ORDER BY
@@ -2866,7 +2962,7 @@ def yield_report():
             hybrid_summary.append({"name": hybrid, **averages})
 
         silage_rows = []
-        if crop_name.lower() == "corn":
+        if crop_name.lower() in ("corn", "corn/hmc"):
             for silage_field in silage_fields:
                 if silage_field["Crop_Year"] != section_year:
                     continue
@@ -2933,16 +3029,17 @@ def yield_export():
     crop        = _canonical_crop_name(request.args.get("crop", ""))
 
     harvest_bu_sql = calculated_bushels_sql("h", "c")
+    yield_crop_sql = "'Corn/HMC'" if crop == "Corn/HMC" else """CASE
+                WHEN LOWER(TRIM(c.Crop_Name)) IN ('soybean', 'soybeans') THEN 'Soybeans'
+                ELSE c.Crop_Name
+            END"""
     query = """
         SELECT
             fi.Crop_Year AS Crop_Year,
             g.Grower_Name,
             d.Dpt_Name AS Department_Name,
             fi.Field_Name,
-            CASE
-                WHEN LOWER(TRIM(c.Crop_Name)) IN ('soybean', 'soybeans') THEN 'Soybeans'
-                ELSE c.Crop_Name
-            END AS Crop_Name,
+            """ + yield_crop_sql + """ AS Crop_Name,
             fi.Acres,
 
             ROUND(SUM(COALESCE(""" + harvest_bu_sql + """, 0)), 1) AS Total_Bushels,
@@ -2969,16 +3066,18 @@ def yield_export():
         query += " AND fi.Crop_Year = %s"
         params.append(crop_year)
     if grower:
-        query += " AND g.Grower_Name LIKE %s"
-        params.append(f"%{grower}%")
+        query += " AND g.Grower_Name = %s"
+        params.append(grower)
     if department:
-        query += " AND d.Dpt_Name LIKE %s"
-        params.append(f"%{department}%")
+        query += " AND d.Dpt_Name = %s"
+        params.append(department)
     if field:
-        query += " AND fi.Field_Name LIKE %s"
-        params.append(f"%{field}%")
+        query += " AND fi.Field_Name = %s"
+        params.append(field)
     if crop:
-        if crop == "Soybeans":
+        if crop == "Corn/HMC":
+            query += " AND (UPPER(TRIM(c.Crop_Code)) IN ('C', 'HMC') OR LOWER(TRIM(c.Crop_Name)) IN ('corn', 'hmc', 'high moisture corn'))"
+        elif crop == "Soybeans":
             query += " AND LOWER(TRIM(c.Crop_Name)) IN ('soybean', 'soybeans')"
         else:
             query += " AND c.Crop_Name = %s"
@@ -2986,11 +3085,8 @@ def yield_export():
 
     query += """
         GROUP BY
-            fi.Crop_Year, g.Grower_Name, d.Dpt_Name, fi.Field_Name,
-            CASE
-                WHEN LOWER(TRIM(c.Crop_Name)) IN ('soybean', 'soybeans') THEN 'Soybeans'
-                ELSE c.Crop_Name
-            END,
+            fi.Field_ID, fi.Crop_Year, g.Grower_Name, d.Dpt_Name, fi.Field_Name,
+            """ + yield_crop_sql + """,
             fi.Acres
         ORDER BY
             fi.Crop_Year DESC, g.Grower_Name, d.Dpt_Name, fi.Field_Name
@@ -3026,6 +3122,26 @@ def inventory_report():
         crop_name=crop_name,
     )
 
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("""SELECT DISTINCT fi.Crop_Year
+        FROM Field fi JOIN Department d ON fi.Dpt_ID=d.Dpt_ID
+        WHERE d.Grower_ID=%s AND fi.Crop_Year IS NOT NULL
+        ORDER BY fi.Crop_Year DESC""", (current_user.grower_id,))
+    crop_years = [r["Crop_Year"] for r in cur.fetchall()]
+    cur.execute("""SELECT DISTINCT """ + INVENTORY_CROP_SQL + """ AS Crop_Name
+        FROM Crop c
+        WHERE EXISTS (SELECT 1 FROM Harvest h
+            JOIN Field fi ON h.Field_ID=fi.Field_ID
+            JOIN Department d ON fi.Dpt_ID=d.Dpt_ID
+            WHERE h.Crop_ID=c.Crop_ID AND d.Grower_ID=%s)
+           OR EXISTS (SELECT 1 FROM Delivery d
+            WHERE d.Crop_ID=c.Crop_ID AND d.Grower_ID=%s)
+        ORDER BY Crop_Name""", (current_user.grower_id, current_user.grower_id))
+    crop_options = [r["Crop_Name"] for r in cur.fetchall() if r["Crop_Name"]]
+    cur.close()
+    conn.close()
+
     active_filters = {"crop_year": crop_year, "crop": crop_name}
 
     return render_template(
@@ -3033,6 +3149,8 @@ def inventory_report():
         rows=inventory_rows,
         summary=summary,
         corn_split=corn_split,
+        crop_years=crop_years,
+        crop_options=crop_options,
         active_filters=active_filters
     )
 
@@ -3046,7 +3164,7 @@ def inventory_export():
     rows, _, _ = build_inventory_snapshot(crop_year=crop_year, crop_name=crop_name)
     df = pd.DataFrame([
         {
-            "BIN LOCATION": row["Bin_Name"],
+            "BIN LOCATION": row["Bin_Code"] or row["Bin_Name"],
             "Note": row["Note"] or "",
             "CROP": row["Crop_Name"],
             "HARVEST": row["Harvest_Bu"],
@@ -3056,8 +3174,7 @@ def inventory_export():
         }
         for row in rows
     ])
-    if not df.empty:
-        df = df.sort_values(["BIN LOCATION", "CROP"])
+    # Keep the natural bin order from build_inventory_snapshot.
 
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -3068,14 +3185,65 @@ def inventory_export():
     return send_file(output, as_attachment=True, download_name="Inventory_Report.xlsx")
 
 
-# @app.route("/slingshot/import")
-# @login_required
-# def slingshot_import():
-#     try:
-#         run_slingshot_import()
-#         return {"status": "ok", "message": "Slingshot import completed"}
-#     except Exception as e:
-#         return {"status": "error", "message": str(e)}, 500
+@app.route("/raven/import", methods=["GET", "POST"])
+@admin_required
+def raven_import():
+    form = {
+        "year": "",
+        "from_date": "",
+        "file_ids": "",
+    }
+    result = None
+
+    if request.method == "POST":
+        from contextlib import redirect_stdout
+        from io import StringIO
+
+        from import_grc import (
+            import_all_graincart_files,
+            import_graincart_files_by_ids,
+            parse_file_id_tokens,
+            safe_date,
+        )
+
+        form["year"] = request.form.get("year", "").strip()
+        form["from_date"] = request.form.get("from_date", "").strip()
+        form["file_ids"] = request.form.get("file_ids", "").strip()
+
+        filter_year = None
+        parsed_from_date = None
+
+        try:
+            if form["year"]:
+                filter_year = int(form["year"])
+                if filter_year < 2000 or filter_year > 2100:
+                    raise ValueError("Crop/load year must be between 2000 and 2100.")
+
+            if form["from_date"]:
+                parsed_from_date = safe_date(form["from_date"])
+                if parsed_from_date is None:
+                    raise ValueError("From date must be a valid date.")
+
+            output = StringIO()
+            with redirect_stdout(output):
+                if form["file_ids"]:
+                    import_graincart_files_by_ids(
+                        parse_file_id_tokens([form["file_ids"]]),
+                        filter_year=filter_year,
+                        from_date=parsed_from_date,
+                    )
+                else:
+                    import_all_graincart_files(
+                        filter_year=filter_year,
+                        from_date=parsed_from_date,
+                    )
+            result = output.getvalue() or "Import completed."
+            flash("Raven import completed.", "success")
+        except Exception as exc:
+            result = f"Import failed: {exc}"
+            flash("Raven import failed. Review the import result details.", "danger")
+
+    return render_template("raven_import.html", form=form, result=result)
 
 
 

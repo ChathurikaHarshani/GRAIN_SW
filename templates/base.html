@@ -213,6 +213,8 @@
               <li><a class="dropdown-item" href="{{ url_for('list_delivery_locations') }}">Delivery Locations</a></li>
               <li><a class="dropdown-item" href="{{ url_for('list_market_prices') }}">Market Prices</a></li>
               <li><a class="dropdown-item" href="{{ url_for('manage_users') }}">User Access</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item" href="{{ url_for('raven_import') }}">Import Raven Data</a></li>
             </ul>
           </li>
           {% endif %}

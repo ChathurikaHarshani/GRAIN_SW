@@ -18,12 +18,18 @@
 <form method="GET" class="row g-3 mb-3">
   <div class="col-md-2">
     <label class="form-label ">Crop Year</label>
-    <input type="number" class="form-control" name="crop_year" value="{{ active_filters.crop_year }}">
+    <select class="form-select" name="crop_year">
+      <option value="">All Years</option>
+      {% for year in crop_years %}<option value="{{ year }}" {% if active_filters.crop_year|string == year|string %}selected{% endif %}>{{ year }}</option>{% endfor %}
+    </select>
   </div>
 
   <div class="col-md-4">
-    <label class="form-label ">Crop (search)</label>
-    <input type="text" class="form-control" name="crop" value="{{ active_filters.crop }}" placeholder="Corn, Soybeans...">
+    <label class="form-label ">Crop</label>
+    <select class="form-select" name="crop">
+      <option value="">All Crops</option>
+      {% for crop in crop_options %}<option value="{{ crop }}" {% if active_filters.crop == crop %}selected{% endif %}>{{ crop }}</option>{% endfor %}
+    </select>
   </div>
 
   <div class="col-md-2 d-flex align-items-end">
@@ -50,7 +56,7 @@
         <tbody>
           {% for r in rows %}
           <tr>
-            <td>{{ r.Bin_Name }}</td>
+            <td>{{ r.Bin_Code or r.Bin_Name }}</td>
             <td>{{ r.Note or "" }}</td>
             <td>{{ r.Crop_Name or "-" }}</td>
             <td class="text-end">{{ "{:,.1f}".format(r.Harvest_Bu or 0) }}</td>

@@ -85,7 +85,7 @@
       <div class="text-muted small">User access</div><div class="fs-3 fw-bold">{{ dashboard_data.pending_users }}</div><div>pending requests</div>
     </div>{% if current_user.is_admin %}</a>{% endif %}
   </div>
-  <div class="col-md-4"><a class="text-decoration-none text-reset" href="{{ url_for('harvest_query', crop_year=dashboard_data.year) }}">
+  <div class="col-md-4"><a class="text-decoration-none text-reset" href="{{ url_for('harvest_query', crop_year=dashboard_data.year, needs_attention='1') }}">
     <div class="main-content shadow-sm h-100 gms-card border-start {{ 'border-warning' if dashboard_data.incomplete_loads else 'border-success' }} border-4">
       <div class="text-muted small">Needs attention</div><div class="fs-3 fw-bold">{{ dashboard_data.incomplete_loads }}</div><div>loads missing weight, moisture, or storage</div>
     </div></a></div>
@@ -253,7 +253,7 @@
     options: {
       responsive: true,
       plugins: { legend: { display: true } },
-      scales: { y: { beginAtZero: true } }
+      scales: { y: { beginAtZero: true, min: 0 } }
     }
   });
 </script>
