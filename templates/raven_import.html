@@ -56,17 +56,41 @@
       <div class="alert alert-warning mb-3">
         This import may update matching existing Harvest rows. Use a year, date, or file ID filter before running a large import.
       </div>
-      <button type="submit" class="btn btn-primary">
+      <button id="import-button" type="submit" class="btn btn-primary" {% if job and job.status in ['queued', 'running'] %}disabled{% endif %}>
         <i class="bi bi-cloud-download me-1"></i> Import Raven Data
       </button>
     </div>
   </form>
 </div>
 
-{% if result %}
+{% if job %}
 <div class="main-content shadow-sm gms-card mt-4">
-  <h2 class="h5 fw-bold mb-3">Import Result</h2>
-  <pre class="bg-light border rounded p-3 mb-0" style="white-space: pre-wrap;">{{ result }}</pre>
+  <h2 class="h5 fw-bold mb-3">Import status: <span id="import-status">{{ job.status|replace('_', ' ') }}</span></h2>
+  <p id="import-help">You can leave this page and return to check progress. Interrupted or failed imports may have saved some files.</p>
+  <pre id="import-output" class="bg-light border rounded p-3 mb-0" style="white-space: pre-wrap; max-height: 32rem; overflow: auto;">{{ job.output }}</pre>
 </div>
+<script>
+  let running = {{ (job.status in ['queued', 'running'])|tojson }};
+  async function refreshImport() {
+    if (!running) return;
+    try {
+      const response = await fetch({{ url_for('raven_import_status')|tojson }}, {cache: 'no-store'});
+      if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) {
+        document.getElementById('import-help').textContent = 'Unable to refresh status. Reload this page or sign in again.';
+        return;
+      }
+      const data = await response.json();
+      if (!data.job) return;
+      document.getElementById('import-status').textContent = data.job.status.replaceAll('_', ' ');
+      document.getElementById('import-output').textContent = data.job.output;
+      running = ['queued', 'running'].includes(data.job.status);
+      document.getElementById('import-button').disabled = running;
+    } catch (error) {
+      document.getElementById('import-help').textContent = 'Connection interrupted; retrying status shortly.';
+    }
+    if (running) setTimeout(refreshImport, 3000);
+  }
+  if (running) setTimeout(refreshImport, 3000);
+</script>
 {% endif %}
 {% endblock %}

@@ -3188,62 +3188,42 @@ def inventory_export():
 @app.route("/raven/import", methods=["GET", "POST"])
 @admin_required
 def raven_import():
-    form = {
-        "year": "",
-        "from_date": "",
-        "file_ids": "",
-    }
-    result = None
-
+    from raven_jobs import start, latest
+    form = {key: request.form.get(key, "").strip() for key in ("year", "from_date", "file_ids")}
     if request.method == "POST":
-        from contextlib import redirect_stdout
-        from io import StringIO
-
-        from import_grc import (
-            import_all_graincart_files,
-            import_graincart_files_by_ids,
-            parse_file_id_tokens,
-            safe_date,
-        )
-
-        form["year"] = request.form.get("year", "").strip()
-        form["from_date"] = request.form.get("from_date", "").strip()
-        form["file_ids"] = request.form.get("file_ids", "").strip()
-
-        filter_year = None
-        parsed_from_date = None
-
         try:
-            if form["year"]:
-                filter_year = int(form["year"])
-                if filter_year < 2000 or filter_year > 2100:
-                    raise ValueError("Crop/load year must be between 2000 and 2100.")
+            from import_grc import parse_file_id_tokens, safe_date
+            year = int(form["year"]) if form["year"] else None
+            if year is not None and not 2000 <= year <= 2100:
+                raise ValueError("Crop/load year must be between 2000 and 2100.")
+            if form["from_date"] and safe_date(form["from_date"]) is None:
+                raise ValueError("From date must be a valid date.")
+            ids = parse_file_id_tokens([form["file_ids"]]) if form["file_ids"] else []
+            if form["file_ids"] and not ids:
+                raise ValueError("Enter valid Raven file IDs.")
+            start(current_user.grower_id, {"year": year, "from_date": form["from_date"], "file_ids": ids})
+            flash("Import started. You can leave this page and return to check progress.", "success")
+            return redirect(url_for("raven_import"))
+        except ValueError as exc:
+            flash(str(exc), "danger")
+        except Exception:
+            app.logger.exception("Could not start Raven import")
+            flash("Could not start the import. Check the server log for details.", "danger")
+    job = latest(current_user.grower_id)
+    if request.method == "GET" and job:
+        form = {"year": job["options"]["year"] or "", "from_date": job["options"]["from_date"],
+                "file_ids": ",".join(map(str, job["options"]["file_ids"]))}
+    return render_template("raven_import.html", form=form, job=job)
 
-            if form["from_date"]:
-                parsed_from_date = safe_date(form["from_date"])
-                if parsed_from_date is None:
-                    raise ValueError("From date must be a valid date.")
 
-            output = StringIO()
-            with redirect_stdout(output):
-                if form["file_ids"]:
-                    import_graincart_files_by_ids(
-                        parse_file_id_tokens([form["file_ids"]]),
-                        filter_year=filter_year,
-                        from_date=parsed_from_date,
-                    )
-                else:
-                    import_all_graincart_files(
-                        filter_year=filter_year,
-                        from_date=parsed_from_date,
-                    )
-            result = output.getvalue() or "Import completed."
-            flash("Raven import completed.", "success")
-        except Exception as exc:
-            result = f"Import failed: {exc}"
-            flash("Raven import failed. Review the import result details.", "danger")
+@app.get("/raven/import/status")
+@admin_required
+def raven_import_status():
+    from raven_jobs import latest
+    response = jsonify(job=latest(current_user.grower_id))
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
-    return render_template("raven_import.html", form=form, result=result)
 
 
 

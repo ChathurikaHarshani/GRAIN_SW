@@ -9,3 +9,5 @@ data/backups/
 data/grc/
 backups/
 gms_dump.sql
+
+data/raven_jobs/

@@ -743,6 +743,7 @@ def import_all_graincart_files(
         print(f"Loads imported: {load_count}")
         print(f"Loads skipped: {skipped_count}")
         print(f"Files errored: {error_count}")
+        return error_count
 
     finally:
         conn.close()
