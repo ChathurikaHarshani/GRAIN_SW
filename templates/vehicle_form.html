@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if vehicle_id else 'Add' }} Vehicle | GMS{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h1>{{ 'Edit' if vehicle_id else 'Add' }} Vehicle</h1>
+  {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+  <form method="post">
+    {% for key, label, limit in [('Vehicle_Code', 'Vehicle Code', 120), ('Vehicle_Name', 'Vehicle Name', 120), ('Load_Cell', 'Load Cell', 100)] %}
+    <div class="mb-3">
+      <label class="form-label" for="{{ key }}">{{ label }}</label>
+      <input class="form-control" id="{{ key }}" name="{{ key }}" value="{{ vehicle.get(key) or '' }}" maxlength="{{ limit }}" {% if key != 'Load_Cell' %}required{% endif %}>
+    </div>
+    {% endfor %}
+    <button class="btn btn-primary" type="submit">Save</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('list_vehicles') }}">Cancel</a>
+  </form>
+</div>
+{% endblock %}

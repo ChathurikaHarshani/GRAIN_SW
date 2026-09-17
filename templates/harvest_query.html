@@ -261,6 +261,8 @@
             <th>Gross</th>
             <th>Tare</th>
             <th>Storage</th>
+            <th>Truck</th>
+            <th>Load Cell</th>
             <th>Bushels</th>
             <th>Note</th>
             {% if can_edit %}<th>Edit</th>{% endif %}
@@ -277,7 +279,9 @@
             <td>{{ r.MC if r.MC is not none else "-" }}</td>
             <td>{{ r.Gross_Weight if r.Gross_Weight is not none else "-" }}</td>
             <td>{{ r.Tare_Weight if r.Tare_Weight is not none else "-" }}</td>
-            <td>{{ r.Storage }}</td>
+            <td>{{ r.Storage or 'Unassigned' }}</td>
+            <td>{{ r.Truck_ID or '-' }}</td>
+            <td>{{ r.Load_Cell or '-' }}</td>
             <td>{{ "{:,.1f}".format(r.Calculated_Bushels) if r.Calculated_Bushels is not none else "-" }}</td>
             <td>{{ r.Note if r.Note else "-" }}</td>
             {% if can_edit %}<td>

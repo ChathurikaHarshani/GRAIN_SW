@@ -378,8 +378,41 @@ def get_or_create_cart(conn, cart_code: str, grower_id: int) -> int:
         return cur.lastrowid
 
 
+def get_or_create_vehicle(conn, truck_value, grower_id, load_cell=None, harvest_date=None):
+    """Register Raven truck codes without overwriting manually edited vehicles."""
+    code = str(truck_value).strip() if truck_value is not None else ""
+    if not code or code.lower() in ("null", "none"):
+        return None
+    if len(code) > 120:
+        raise ValueError("Truck value exceeds the 120-character Vehicle Code limit.")
+    cell = str(load_cell).strip() if load_cell is not None else ""
+    if cell.lower() in ("null", "none"):
+        cell = ""
+    if len(cell) > 100:
+        raise ValueError("Load Cell exceeds the 100-character limit.")
+    with conn.cursor() as cur:
+        cur.execute("SELECT Vehicle_ID FROM Vehicles WHERE Grower_ID=%s AND Vehicle_Code=%s",
+                    (grower_id, code))
+        row = cur.fetchone()
+        if row:
+            vehicle_id = row["Vehicle_ID"]
+        else:
+            cur.execute("""INSERT INTO Vehicles (Grower_ID, Vehicle_Code, Vehicle_Name, Load_Cell)
+                       VALUES (%s, %s, %s, NULL)
+                       ON DUPLICATE KEY UPDATE Vehicle_ID=LAST_INSERT_ID(Vehicle_ID)""",
+                        (grower_id, code, code))
+            vehicle_id = cur.lastrowid
+        if cell:
+            cur.execute("""UPDATE Vehicles SET Load_Cell=%s, Load_Cell_Date=%s
+                WHERE Vehicle_ID=%s AND Grower_ID=%s
+                  AND (Load_Cell_Date IS NULL OR (%s IS NOT NULL AND Load_Cell_Date <= %s))""",
+                (cell, harvest_date, vehicle_id, grower_id, harvest_date, harvest_date))
+        return vehicle_id
+
+
 def find_storage_location(conn, destination_code: Optional[str], grower_id: int) -> Optional[int]:
-    if not destination_code:
+    destination_code = normalize_destination(destination_code)
+    if not destination_code or destination_code.lower() in ("none", "null"):
         return None
 
     lookup_code = destination_to_bin_code(destination_code)
@@ -411,8 +444,17 @@ def find_storage_location(conn, destination_code: Optional[str], grower_id: int)
             }:
                 return row["StorLoc_ID"]
 
-        return None
-
+        if not destination_key:
+            return None
+        if len(lookup_code) > 32 or len(destination_code) > 120:
+            raise ValueError("Destination is too long for storage code/name; review it in Storage Setup.")
+        cur.execute(
+            """INSERT INTO Storage_Location
+               (Bin_Code, Bin_Name, Bin_Capacity, Grower_ID)
+               VALUES (%s, %s, %s, %s)""",
+            (lookup_code, destination_code, 0, grower_id),
+        )
+        return cur.lastrowid
 
 
 def normalize_field_name(name):
@@ -521,7 +563,10 @@ def insert_harvest_load(
     dpt_id = get_or_create_department(conn, farm_name, grower_id)
     field_id = get_or_create_field(conn, field_name, crop_year, dpt_id)
     crop_id = get_or_create_crop(conn, crop_name)
-    cart_id = get_or_create_cart(conn, cart_code, grower_id)
+    # These legacy identifiers were explicitly removed from Cart setup.
+    removed_cart_codes = {"05A", "186A", "214A", "460A", "461A", "A05", "55:88", "58:95"}
+    cart_id = None if cart_code.upper() in removed_cart_codes else get_or_create_cart(conn, cart_code, grower_id)
+    get_or_create_vehicle(conn, truck_id, grower_id, load_cell, harvest_date)
     storloc_id = find_storage_location(conn, destination_code, grower_id)
 
     external_load_key = build_external_load_key(

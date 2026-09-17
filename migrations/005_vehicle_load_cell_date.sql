@@ -1,0 +1,1 @@
+ALTER TABLE Vehicles ADD COLUMN Load_Cell_Date DATE NULL;

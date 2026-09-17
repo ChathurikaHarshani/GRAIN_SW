@@ -1030,6 +1030,75 @@ def edit_cart(cart_id):
 
 
 
+# ----------------- Vehicles ----------------- #
+
+@app.get("/vehicles")
+@admin_required
+def list_vehicles():
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("SELECT * FROM Vehicles WHERE Grower_ID=%s ORDER BY Vehicle_Code", (current_user.grower_id,))
+        vehicles = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+    return render_template("vehicles.html", vehicles=vehicles)
+
+
+@app.route("/vehicles/new", methods=["GET", "POST"])
+@app.route("/vehicles/<int:vehicle_id>/edit", methods=["GET", "POST"])
+@admin_required
+def vehicle_form(vehicle_id=None):
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    vehicle = {}
+    error = None
+    try:
+        if vehicle_id is not None:
+            cur.execute("SELECT * FROM Vehicles WHERE Vehicle_ID=%s AND Grower_ID=%s",
+                        (vehicle_id, current_user.grower_id))
+            vehicle = cur.fetchone()
+            if not vehicle:
+                abort(404)
+        if request.method == "POST":
+            vehicle = {key: request.form.get(key, "").strip()
+                       for key in ("Vehicle_Code", "Vehicle_Name", "Load_Cell")}
+            if not vehicle["Vehicle_Code"] or not vehicle["Vehicle_Name"]:
+                error = "Vehicle Code and Vehicle Name are required."
+            elif any(len(vehicle[key]) > limit for key, limit in
+                     (("Vehicle_Code", 120), ("Vehicle_Name", 120), ("Load_Cell", 100))):
+                error = "Vehicle code/name must be at most 120 characters; Load Cell at most 100."
+            else:
+                values = (vehicle["Vehicle_Code"], vehicle["Vehicle_Name"], vehicle["Load_Cell"] or None)
+                try:
+                    if vehicle_id is None:
+                        cur.execute("""INSERT INTO Vehicles (Vehicle_Code, Vehicle_Name, Load_Cell, Grower_ID)
+                            VALUES (%s,%s,%s,%s)""", values + (current_user.grower_id,))
+                    else:
+                        cur.execute("""UPDATE Vehicles SET Vehicle_Code=%s, Vehicle_Name=%s, Load_Cell=%s
+                            WHERE Vehicle_ID=%s AND Grower_ID=%s""", values + (vehicle_id, current_user.grower_id))
+                    conn.commit()
+                    flash("Vehicle saved successfully.", "success")
+                    return redirect(url_for("list_vehicles"))
+                except IntegrityError as exc:
+                    conn.rollback()
+                    if exc.errno != 1062:
+                        raise
+                    error = "This Vehicle Code already exists. Choose a different code."
+    finally:
+        cur.close()
+        conn.close()
+    return render_template("vehicle_form.html", vehicle=vehicle, vehicle_id=vehicle_id, error=error)
+
+
+@app.post("/vehicles/<int:vehicle_id>/delete")
+@admin_required
+def delete_vehicle(vehicle_id):
+    return _delete_setup_record("DELETE FROM Vehicles WHERE Vehicle_ID=%s AND Grower_ID=%s",
+                                (vehicle_id, current_user.grower_id), "Vehicle", "list_vehicles")
+
+
 # ----------------- Crop: list + create ----------------- #
 
 @app.route("/crops")
@@ -1848,6 +1917,8 @@ def harvest_query():
           h.Gross_Weight,
           h.Tare_Weight,
           COALESCE(NULLIF(s.Bin_Code, ''), s.Bin_Name) AS Storage,
+          h.Truck_ID,
+          h.Load_Cell,
           h.Bushels,
           h.Note
         FROM Harvest h
