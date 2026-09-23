@@ -49,6 +49,28 @@
     </div>
 
     <div class="col-md-2">
+      <label class="form-label" for="filter-truck">Truck</label>
+      <select class="form-select" name="truck_id" id="filter-truck">
+        <option value="">-- All Trucks --</option>
+        {% for truck in trucks %}<option value="{{ truck.Truck_ID }}" {% if extra_filters.truck_id == truck.Truck_ID %}selected{% endif %}>{{ truck.Truck_ID }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label" for="filter-crop">Crop</label>
+      <select class="form-select" name="crop_id" id="filter-crop">
+        <option value="">-- All Crops --</option>
+        {% for crop in crops %}<option value="{{ crop.Crop_ID }}" {% if extra_filters.crop_id == crop.Crop_ID|string %}selected{% endif %}>{{ crop.Crop_Name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label" for="filter-date-from">From date</label>
+      <input class="form-control" type="date" name="date_from" id="filter-date-from" value="{{ extra_filters.date_from }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label" for="filter-date-to">To date</label>
+      <input class="form-control" type="date" name="date_to" id="filter-date-to" value="{{ extra_filters.date_to }}">
+    </div>
+    <div class="col-md-2">
       <button class="btn btn-primary w-100" type="submit">Filter Data</button>
     </div>
 
@@ -97,7 +119,7 @@
   <form
     method="post"
     class="row g-2 no-print"
-    action="{{ url_for('harvest_query', field_id=selected_field_id, field_name=selected_field, storloc_id=selected_storage, crop_year=selected_year, needs_attention='1' if needs_attention else '') }}">
+    action="{{ url_for('harvest_query', field_id=selected_field_id, field_name=selected_field, storloc_id=selected_storage, crop_year=selected_year, truck_id=extra_filters.truck_id, crop_id=extra_filters.crop_id, date_from=extra_filters.date_from, date_to=extra_filters.date_to, needs_attention='1' if needs_attention else '') }}">
     {% if edit_load %}
       <input type="hidden" name="harvest_id" value="{{ edit_load.Harvest_ID }}">
     {% endif %}
@@ -193,7 +215,7 @@
       {% if edit_load %}
         <a
           class="btn btn-outline-secondary ms-2"
-          href="{{ url_for('harvest_query', field_id=selected_field_id, field_name=selected_field, storloc_id=selected_storage, crop_year=selected_year, needs_attention='1' if needs_attention else '') }}">
+          href="{{ url_for('harvest_query', field_id=selected_field_id, field_name=selected_field, storloc_id=selected_storage, crop_year=selected_year, truck_id=extra_filters.truck_id, crop_id=extra_filters.crop_id, date_from=extra_filters.date_from, date_to=extra_filters.date_to, needs_attention='1' if needs_attention else '') }}">
           Cancel Edit
         </a>
       {% endif %}
@@ -262,7 +284,7 @@
             <th>Tare</th>
             <th>Storage</th>
             <th>Truck</th>
-            <th>Load Cell</th>
+            <th>Cart</th>
             <th>Bushels</th>
             <th>Note</th>
             {% if can_edit %}<th>Edit</th>{% endif %}
@@ -281,13 +303,13 @@
             <td>{{ r.Tare_Weight if r.Tare_Weight is not none else "-" }}</td>
             <td>{{ r.Storage or 'Unassigned' }}</td>
             <td>{{ r.Truck_ID or '-' }}</td>
-            <td>{{ r.Load_Cell or '-' }}</td>
+            <td>{{ r.Cart_Display }}</td>
             <td>{{ "{:,.1f}".format(r.Calculated_Bushels) if r.Calculated_Bushels is not none else "-" }}</td>
             <td>{{ r.Note if r.Note else "-" }}</td>
             {% if can_edit %}<td>
               <a
                 class="btn btn-sm btn-outline-primary"
-                href="{{ url_for('harvest_query', field_id=selected_field_id, field_name=selected_field, storloc_id=selected_storage, crop_year=selected_year, needs_attention='1' if needs_attention else '', edit_id=r.Harvest_ID, _anchor='harvest-load-form') }}">
+                href="{{ url_for('harvest_query', field_id=selected_field_id, field_name=selected_field, storloc_id=selected_storage, crop_year=selected_year, truck_id=extra_filters.truck_id, crop_id=extra_filters.crop_id, date_from=extra_filters.date_from, date_to=extra_filters.date_to, needs_attention='1' if needs_attention else '', edit_id=r.Harvest_ID, _anchor='harvest-load-form') }}">
                 Edit
               </a>
             </td>{% endif %}

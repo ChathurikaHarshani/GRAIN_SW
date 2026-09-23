@@ -11,7 +11,7 @@
 
     <div class="d-flex gap-2">
       <a
-  href="{{ url_for('harvest_query', field_name=selected_field, storloc_id=selected_storage, crop_year=selected_year) }}"
+  href="{{ url_for('harvest_query', field_id=selected_field_id, field_name=selected_field, storloc_id=selected_storage, crop_year=selected_year, truck_id=extra_filters.truck_id, crop_id=extra_filters.crop_id, date_from=extra_filters.date_from, date_to=extra_filters.date_to, needs_attention='1' if needs_attention else '') }}"
   class="btn btn-primary w-100"
 >
   Back to Harvest Loads

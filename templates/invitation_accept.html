@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>GMS invitation</title>
+<style>body{font:16px system-ui,sans-serif;background:#f2f5f2;color:#203027;margin:0;padding:32px 16px}main{max-width:520px;margin:5vh auto;background:white;padding:32px;border-radius:16px;box-shadow:0 8px 30px #0001}label{display:block;margin-top:18px}input,select,button{box-sizing:border-box;width:100%;padding:12px;margin-top:6px;font:inherit}button{background:#28653b;color:white;border:0;border-radius:6px;margin-top:24px;cursor:pointer}.error{color:#9b2226;background:#fff0ef;padding:12px}a{color:#28653b}</style></head><body><main>
+<h1>GMS invitation</h1>
+{% if accepted %}<p>Your email is verified and your grower access is active.</p><a href="{{ url_for('login') }}">Sign in to GMS</a>
+{% else %}
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if invitation %}
+<p>Join <strong>{{ invitation.Grower_Name }}</strong> as <strong>{{ invitation.role|title }}</strong>.</p>
+<p>Invitation for <strong>{{ invitation.email }}</strong></p>
+<form method="post">
+<input type="hidden" name="csrf_token" value="{{ access_csrf_token() }}">
+<label for="mode">Account</label><select id="mode" name="mode"><option value="new" {% if request.form.get('mode') != 'existing' %}selected{% endif %}>Create new account</option><option value="existing" {% if request.form.get('mode') == 'existing' %}selected{% endif %}>Existing account</option></select>
+<label for="username">Username</label><input id="username" name="username" maxlength="80" autocomplete="username" value="{{ request.form.get('username','') }}" required>
+<label for="password">Password</label><input id="password" type="password" name="password" autocomplete="new-password" required>
+<div id="confirmation"><label for="confirm">Confirm new password</label><input id="confirm" type="password" name="confirm_password" autocomplete="new-password"></div>
+<p>For a new account, use at least eight characters (maximum 72 bytes).</p>
+<button type="submit">Accept invitation</button></form>
+<script>const mode=document.getElementById('mode');function update(){const isNew=mode.value==='new';document.getElementById('confirmation').hidden=!isNew;document.getElementById('confirm').required=isNew;document.getElementById('password').autocomplete=isNew?'new-password':'current-password';}mode.addEventListener('change',update);update();</script>
+{% endif %}{% endif %}
+</main></body></html>

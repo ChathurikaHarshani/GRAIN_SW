@@ -2,6 +2,33 @@
 {% block title %}User access | GMS{% endblock %}
 {% block content %}
 <div class="container py-4"><h1>User access</h1><p class="text-muted">Manage access to {{ current_user.grower_name }}.</p>
+<section class="card card-body mb-4">
+  <h2 class="h4">Invite user</h2>
+  <p>Invite an @unl.edu user to this grower account. Invitations expire after seven days.</p>
+  {% if not email_ready %}<div class="alert alert-warning">Invitation email is not configured. The server administrator must configure the approved sender address and app URL.</div>{% endif %}
+  <form method="post" action="{{ url_for('invitations.invite') }}" class="row g-3 align-items-end">
+    <input type="hidden" name="csrf_token" value="{{ access_csrf_token() }}">
+    <input type="hidden" name="action" value="invite">
+    <div class="col-md-6"><label for="invite-email" class="form-label">UNL email</label><input class="form-control" id="invite-email" name="email" type="email" maxlength="254" placeholder="name@unl.edu" required></div>
+    <div class="col-md-3"><label for="invite-role" class="form-label">Access</label><select class="form-select" id="invite-role" name="role"><option value="viewer">Viewer</option><option value="editor">Editor</option><option value="admin">Admin</option></select></div>
+    <div class="col-md-3"><button class="btn btn-primary" {% if not email_ready %}disabled{% endif %}>Send invitation</button></div>
+  </form>
+  <p class="form-text mt-2">Viewers can read reports. Editors can also manage harvest loads. Admins can manage setup and user access.</p>
+</section>
+{% if invitations %}
+<h2 class="h4">Invitations</h2>
+<div class="table-responsive mb-4"><table class="table align-middle">
+<thead><tr><th>Email</th><th>Access</th><th>Status</th><th>Expires (UTC)</th><th>Actions</th></tr></thead>
+<tbody>{% for invitation in invitations %}<tr>
+<td>{{ invitation.email }}</td><td>{{ invitation.role|title }}</td>
+<td>{{ 'Expired' if invitation.expired and invitation.status in ['pending','sending'] else invitation.status|title }}</td><td>{{ invitation.expires_at }}</td>
+<td>{% if invitation.status != 'accepted' %}<form method="post" action="{{ url_for('invitations.invite') }}" class="d-flex gap-2">
+<input type="hidden" name="csrf_token" value="{{ access_csrf_token() }}"><input type="hidden" name="invitation_id" value="{{ invitation.id }}">
+<button class="btn btn-sm btn-outline-primary" name="action" value="resend" {% if not email_ready %}disabled{% endif %}>Resend</button>
+{% if invitation.status != 'revoked' %}<button class="btn btn-sm btn-outline-danger" name="action" value="revoke">Revoke</button>{% endif %}
+</form>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+{% endif %}
+<h2 class="h4">Current users</h2>
 <div class="table-responsive">
 <table class="table align-middle gms-filter-table" data-search-label="users">
 <thead><tr><th>User</th><th>Requested</th><th>Current access</th><th>Actions</th></tr></thead>
@@ -16,6 +43,7 @@
   </td>
   <td>
     <form method="post" class="d-flex flex-wrap gap-2">
+      <input type="hidden" name="csrf_token" value="{{ access_csrf_token() }}">
       <input type="hidden" name="membership_id" value="{{ m.id }}">
       <button class="btn btn-sm {{ 'btn-primary' if m.status != 'active' or m.role != 'viewer' else 'btn-outline-secondary' }}" name="action" value="approve_viewer">{{ 'Approve as ' if m.status != 'active' else 'Make ' }}Viewer</button>
       <button class="btn btn-sm {{ 'btn-primary' if m.status != 'active' or m.role != 'editor' else 'btn-outline-secondary' }}" name="action" value="approve_editor">{{ 'Approve as ' if m.status != 'active' else 'Make ' }}Editor</button>

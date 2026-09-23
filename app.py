@@ -21,6 +21,9 @@ import pandas as pd
 
 app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
+from invitations import bp as invitations_bp, ensure_schema as ensure_invitation_schema, csrf_token as access_csrf_token, check_csrf as check_access_csrf, email_ready
+app.register_blueprint(invitations_bp)
+app.jinja_env.globals['access_csrf_token'] = access_csrf_token
 _access_schema_ready = False
 
 
@@ -52,7 +55,7 @@ login_manager.init_app(app)
 def protect_pending_accounts():
     if not current_user.is_authenticated:
         return None
-    allowed = {"access_pending", "logout", "static"}
+    allowed = {"access_pending", "logout", "static", "invitations.accept"}
     if current_user.membership_status != "active" and request.endpoint not in allowed:
         return redirect(url_for("access_pending"))
 
@@ -116,6 +119,7 @@ def ensure_access_schema():
           CONSTRAINT fk_membership_approver FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """)
+    ensure_invitation_schema(cur)
     # Tables without an existing Department/Field path need an explicit owner.
     tenant_tables = ("Cart", "Storage_Location", "Delivery_Location", "MarketPriceMonthly", "Delivery")
     for table_name in tenant_tables:
@@ -156,9 +160,9 @@ def get_membership(user_id):
         FROM grower_memberships gm
         JOIN Grower g ON g.Grower_ID=gm.Grower_ID
         WHERE gm.user_id=%s
-        ORDER BY (gm.status='active') DESC, gm.id
+        ORDER BY (gm.status='active') DESC, (gm.Grower_ID=%s) DESC, gm.id
         LIMIT 1
-    """, (user_id,))
+    """, (user_id, session.get('active_grower_id', 0)))
     membership = cur.fetchone()
     cur.close()
     conn.close()
@@ -365,6 +369,8 @@ def signup():
 @app.route("/users", methods=["GET", "POST"])
 @admin_required
 def manage_users():
+    if request.method == "POST":
+        check_access_csrf()
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
     if request.method == "POST":
@@ -400,6 +406,7 @@ def manage_users():
                 "suspend": "User access suspended.",
             }
             flash(messages[action], "success")
+        cur.close(); conn.close()
         return redirect(url_for("manage_users"))
     cur.execute("""
         SELECT gm.id, u.username, u.full_name, gm.role, gm.status, gm.created_at
@@ -407,8 +414,12 @@ def manage_users():
         WHERE gm.Grower_ID=%s ORDER BY (gm.status='pending') DESC, u.username
     """, (current_user.grower_id,))
     memberships = cur.fetchall()
+    cur.execute("""SELECT id,email,role,status,created_at,expires_at,
+        (expires_at <= UTC_TIMESTAMP()) AS expired FROM user_invitations
+        WHERE Grower_ID=%s ORDER BY created_at DESC""", (current_user.grower_id,))
+    invitations = cur.fetchall()
     cur.close(); conn.close()
-    return render_template("users.html", memberships=memberships)
+    return render_template("users.html", memberships=memberships, invitations=invitations, email_ready=email_ready())
 
 
 @app.route("/season-setup", methods=["GET", "POST"])
@@ -984,7 +995,7 @@ def edit_field(field_id):
 def list_carts():
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
-    cur.execute("SELECT Cart_ID, Cart_Code, Cart_Name FROM Cart WHERE Grower_ID=%s ORDER BY Cart_Name;", (current_user.grower_id,))
+    cur.execute("SELECT Cart_ID, Cart_Code, Cart_Name, Load_Cell FROM Cart WHERE Grower_ID=%s ORDER BY Cart_Name;", (current_user.grower_id,))
     carts = cur.fetchall()
     cur.close()
     conn.close()
@@ -996,13 +1007,16 @@ def new_cart():
     if request.method == "POST":
         cart_code = request.form.get("cart_code", "").strip()
         cart_name = request.form.get("cart_name", "").strip()
+        load_cell = request.form.get("load_cell", "").strip()
+        if len(load_cell) > 100:
+            return render_template("cart_form.html", error="Load Cell must be at most 100 characters.")
 
         if cart_code and cart_name:
             conn = get_conn()
             cur = conn.cursor()
             cur.execute(
-                "INSERT INTO Cart (Cart_Code, Cart_Name, Grower_ID) VALUES (%s, %s, %s);",
-                (cart_code, cart_name, current_user.grower_id)
+                "INSERT INTO Cart (Cart_Code, Cart_Name, Load_Cell, Grower_ID) VALUES (%s, %s, %s, %s);",
+                (cart_code, cart_name, load_cell or None, current_user.grower_id)
             )
             conn.commit()
             cur.close()
@@ -1023,9 +1037,13 @@ def edit_cart(cart_id):
     error=None
     if request.method=="POST":
         code=request.form.get("cart_code","").strip(); name=request.form.get("cart_name","").strip()
-        if code and name:
-            cur.execute("UPDATE Cart SET Cart_Code=%s,Cart_Name=%s WHERE Cart_ID=%s AND Grower_ID=%s",(code,name,cart_id,current_user.grower_id)); conn.commit(); cur.close(); conn.close(); flash("Cart updated successfully.", "success"); return redirect(url_for("list_carts"))
-        error="Cart Code and Cart Name are required."
+        load_cell=request.form.get("load_cell", "").strip()
+        if not code or not name:
+            error="Cart Code and Cart Name are required."
+        elif len(load_cell) > 100:
+            error="Load Cell must be at most 100 characters."
+        else:
+            cur.execute("UPDATE Cart SET Cart_Code=%s,Cart_Name=%s,Load_Cell=%s WHERE Cart_ID=%s AND Grower_ID=%s",(code,name,load_cell or None,cart_id,current_user.grower_id)); conn.commit(); cur.close(); conn.close(); flash("Cart updated successfully.", "success"); return redirect(url_for("list_carts"))
     cur.close(); conn.close(); return render_template("cart_form.html",cart=cart,error=error)
 
 
@@ -1063,20 +1081,20 @@ def vehicle_form(vehicle_id=None):
                 abort(404)
         if request.method == "POST":
             vehicle = {key: request.form.get(key, "").strip()
-                       for key in ("Vehicle_Code", "Vehicle_Name", "Load_Cell")}
+                       for key in ("Vehicle_Code", "Vehicle_Name")}
             if not vehicle["Vehicle_Code"] or not vehicle["Vehicle_Name"]:
                 error = "Vehicle Code and Vehicle Name are required."
             elif any(len(vehicle[key]) > limit for key, limit in
-                     (("Vehicle_Code", 120), ("Vehicle_Name", 120), ("Load_Cell", 100))):
-                error = "Vehicle code/name must be at most 120 characters; Load Cell at most 100."
+                     (("Vehicle_Code", 120), ("Vehicle_Name", 120))):
+                error = "Vehicle code/name must be at most 120 characters."
             else:
-                values = (vehicle["Vehicle_Code"], vehicle["Vehicle_Name"], vehicle["Load_Cell"] or None)
+                values = (vehicle["Vehicle_Code"], vehicle["Vehicle_Name"])
                 try:
                     if vehicle_id is None:
-                        cur.execute("""INSERT INTO Vehicles (Vehicle_Code, Vehicle_Name, Load_Cell, Grower_ID)
-                            VALUES (%s,%s,%s,%s)""", values + (current_user.grower_id,))
+                        cur.execute("""INSERT INTO Vehicles (Vehicle_Code, Vehicle_Name, Grower_ID)
+                            VALUES (%s,%s,%s)""", values + (current_user.grower_id,))
                     else:
-                        cur.execute("""UPDATE Vehicles SET Vehicle_Code=%s, Vehicle_Name=%s, Load_Cell=%s
+                        cur.execute("""UPDATE Vehicles SET Vehicle_Code=%s, Vehicle_Name=%s
                             WHERE Vehicle_ID=%s AND Grower_ID=%s""", values + (vehicle_id, current_user.grower_id))
                     conn.commit()
                     flash("Vehicle saved successfully.", "success")
@@ -1659,11 +1677,51 @@ def delete_market_price(price_id):
 #     )
 
 
+def harvest_extra_filters():
+    """Validate filters shared by the loads and summary pages."""
+    filters = {key: request.args.get(key, "").strip()
+               for key in ("truck_id", "crop_id", "date_from", "date_to")}
+    try:
+        for key in ("date_from", "date_to"):
+            if filters[key]:
+                filters[key] = date.fromisoformat(filters[key]).isoformat()
+        if filters["date_from"] and filters["date_to"] and filters["date_from"] > filters["date_to"]:
+            raise ValueError
+    except ValueError:
+        abort(400, description="Choose valid dates with From date on or before To date.")
+    return filters
+
+
+def append_harvest_filters(where, params, filters):
+    for key, expression in (("truck_id", "h.Truck_ID = %s"),
+                            ("crop_id", "h.Crop_ID = %s"),
+                            ("date_from", "h.Harvest_Date >= %s"),
+                            ("date_to", "h.Harvest_Date <= %s")):
+        if filters[key]:
+            where.append(expression)
+            params.append(filters[key])
+
+
+def harvest_cart_label(load, carts):
+    """Prefer a unique load-cell match, then the historical/manual cart link."""
+    cell = str(load.get("Load_Cell") or "").strip().lower()
+    if cell not in ("", "null", "none"):
+        matches = [cart for cart in carts
+                   if str(cart.get("Load_Cell") or "").strip().lower() == cell]
+        if len(matches) > 1:
+            return "Ambiguous cart"
+        if matches:
+            return matches[0].get("Cart_Name") or matches[0].get("Cart_Code") or "Unassigned"
+    linked = next((cart for cart in carts if cart["Cart_ID"] == load.get("Cart_ID")), None)
+    return (linked.get("Cart_Name") or linked.get("Cart_Code") or "Unassigned") if linked else "Unassigned"
+
+
 @app.route("/harvest-query", methods=["GET", "POST"])
 @login_required
 def harvest_query():
     if request.method == "POST" and not current_user.can_edit:
         abort(403)
+    extra_filters = harvest_extra_filters()
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
 
@@ -1728,8 +1786,14 @@ def harvest_query():
     cur.execute("SELECT Crop_ID, Crop_Name, Weight_PerBushel, Base_MC FROM Crop ORDER BY Crop_Name;")
     crops = cur.fetchall()
 
-    cur.execute("SELECT Cart_ID, Cart_Name FROM Cart WHERE Grower_ID=%s ORDER BY Cart_Name;", (current_user.grower_id,))
+    cur.execute("SELECT Cart_ID, Cart_Code, Cart_Name, Load_Cell FROM Cart WHERE Grower_ID=%s ORDER BY Cart_Name;", (current_user.grower_id,))
     carts = cur.fetchall()
+    cur.execute("""SELECT DISTINCT h.Truck_ID FROM Harvest h
+        JOIN Field f ON f.Field_ID=h.Field_ID
+        JOIN Department d ON d.Dpt_ID=f.Dpt_ID
+        WHERE d.Grower_ID=%s AND h.Truck_ID IS NOT NULL AND TRIM(h.Truck_ID) <> ''
+        ORDER BY h.Truck_ID""", (current_user.grower_id,))
+    trucks = cur.fetchall()
 
     error = None
     edit_load = None
@@ -1875,6 +1939,7 @@ def harvest_query():
                     field_name=selected_field,
                     storloc_id=selected_storage,
                     crop_year=selected_year,
+                    **extra_filters,
                     needs_attention="1" if needs_attention else ""
                 ))
 
@@ -1900,6 +1965,7 @@ def harvest_query():
     if needs_attention:
         where.append("(h.Gross_Weight IS NULL OR h.MC IS NULL OR h.StorLoc_ID IS NULL)")
 
+    append_harvest_filters(where, params, extra_filters)
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
     cur.execute(f"""
@@ -1919,6 +1985,7 @@ def harvest_query():
           COALESCE(NULLIF(s.Bin_Code, ''), s.Bin_Name) AS Storage,
           h.Truck_ID,
           h.Load_Cell,
+          h.Cart_ID,
           h.Bushels,
           h.Note
         FROM Harvest h
@@ -1953,6 +2020,7 @@ def harvest_query():
     next_load_num = str(int(max_load or 0) + 1)
 
     for row in loads:
+        row["Cart_Display"] = harvest_cart_label(row, carts)
         calculated_bushels = calculate_bushels(
             float(row["Gross_Weight"]) if row["Gross_Weight"] is not None else None,
             float(row["Tare_Weight"]) if row["Tare_Weight"] is not None else 0.0,
@@ -1992,6 +2060,8 @@ def harvest_query():
         years=years,
         crops=crops,
         carts=carts,
+        trucks=trucks,
+        extra_filters=extra_filters,
         loads=loads,
         selected_field=selected_field,
         selected_field_id=selected_field_id,
@@ -2015,6 +2085,7 @@ def harvest_query():
 @app.route("/harvest-summary", methods=["GET"])
 @login_required
 def harvest_summary():
+    extra_filters = harvest_extra_filters()
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
 
@@ -2041,6 +2112,9 @@ def harvest_summary():
         where.append("f.Crop_Year = %s")
         params.append(selected_year)
 
+    if request.args.get("needs_attention", "") == "1":
+        where.append("(h.Gross_Weight IS NULL OR h.MC IS NULL OR h.StorLoc_ID IS NULL)")
+    append_harvest_filters(where, params, extra_filters)
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
     cur.execute(f"""
@@ -2095,6 +2169,8 @@ def harvest_summary():
 
     return render_template(
         "harvest_summary.html",
+        extra_filters=extra_filters,
+        needs_attention=request.args.get("needs_attention", "") == "1",
         rows=rows,
         totals=totals,
         selected_field=selected_field,

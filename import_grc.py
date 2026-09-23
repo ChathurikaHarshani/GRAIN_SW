@@ -358,24 +358,28 @@ def get_or_create_crop(conn, crop_name: str) -> int:
         return cur.lastrowid
 
 
-def get_or_create_cart(conn, cart_code: str, grower_id: int) -> int:
+def get_or_create_cart(conn, cart_code: str, grower_id: int, load_cell=None, harvest_date=None) -> int:
+    cell = str(load_cell).strip() if load_cell is not None else ""
+    if cell.lower() in ("null", "none"):
+        cell = ""
+    if len(cell) > 100:
+        raise ValueError("Load Cell exceeds the 100-character limit.")
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT Cart_ID FROM Cart WHERE Cart_Code = %s AND Grower_ID = %s",
-            (cart_code, grower_id)
-        )
+        cur.execute("SELECT Cart_ID FROM Cart WHERE Cart_Code = %s AND Grower_ID = %s",
+                    (cart_code, grower_id))
         row = cur.fetchone()
         if row:
-            return row["Cart_ID"]
-
-        cur.execute(
-            """
-            INSERT INTO Cart (Cart_Code, Cart_Name, Grower_ID)
-            VALUES (%s, %s, %s)
-            """,
-            (cart_code, f"Cart {cart_code}", grower_id)
-        )
-        return cur.lastrowid
+            cart_id = row["Cart_ID"]
+        else:
+            cur.execute("INSERT INTO Cart (Cart_Code, Cart_Name, Grower_ID) VALUES (%s, %s, %s)",
+                        (cart_code, f"Cart {cart_code}", grower_id))
+            cart_id = cur.lastrowid
+        if cell:
+            cur.execute("""UPDATE Cart SET Load_Cell=%s, Load_Cell_Date=%s
+                WHERE Cart_ID=%s AND Grower_ID=%s
+                  AND (Load_Cell_Date IS NULL OR (%s IS NOT NULL AND Load_Cell_Date <= %s))""",
+                (cell, harvest_date, cart_id, grower_id, harvest_date, harvest_date))
+        return cart_id
 
 
 def get_or_create_vehicle(conn, truck_value, grower_id, load_cell=None, harvest_date=None):
@@ -385,11 +389,6 @@ def get_or_create_vehicle(conn, truck_value, grower_id, load_cell=None, harvest_
         return None
     if len(code) > 120:
         raise ValueError("Truck value exceeds the 120-character Vehicle Code limit.")
-    cell = str(load_cell).strip() if load_cell is not None else ""
-    if cell.lower() in ("null", "none"):
-        cell = ""
-    if len(cell) > 100:
-        raise ValueError("Load Cell exceeds the 100-character limit.")
     with conn.cursor() as cur:
         cur.execute("SELECT Vehicle_ID FROM Vehicles WHERE Grower_ID=%s AND Vehicle_Code=%s",
                     (grower_id, code))
@@ -397,16 +396,11 @@ def get_or_create_vehicle(conn, truck_value, grower_id, load_cell=None, harvest_
         if row:
             vehicle_id = row["Vehicle_ID"]
         else:
-            cur.execute("""INSERT INTO Vehicles (Grower_ID, Vehicle_Code, Vehicle_Name, Load_Cell)
-                       VALUES (%s, %s, %s, NULL)
+            cur.execute("""INSERT INTO Vehicles (Grower_ID, Vehicle_Code, Vehicle_Name)
+                       VALUES (%s, %s, %s)
                        ON DUPLICATE KEY UPDATE Vehicle_ID=LAST_INSERT_ID(Vehicle_ID)""",
                         (grower_id, code, code))
             vehicle_id = cur.lastrowid
-        if cell:
-            cur.execute("""UPDATE Vehicles SET Load_Cell=%s, Load_Cell_Date=%s
-                WHERE Vehicle_ID=%s AND Grower_ID=%s
-                  AND (Load_Cell_Date IS NULL OR (%s IS NOT NULL AND Load_Cell_Date <= %s))""",
-                (cell, harvest_date, vehicle_id, grower_id, harvest_date, harvest_date))
         return vehicle_id
 
 
@@ -565,8 +559,8 @@ def insert_harvest_load(
     crop_id = get_or_create_crop(conn, crop_name)
     # These legacy identifiers were explicitly removed from Cart setup.
     removed_cart_codes = {"05A", "186A", "214A", "460A", "461A", "A05", "55:88", "58:95"}
-    cart_id = None if cart_code.upper() in removed_cart_codes else get_or_create_cart(conn, cart_code, grower_id)
-    get_or_create_vehicle(conn, truck_id, grower_id, load_cell, harvest_date)
+    cart_id = None if cart_code.upper() in removed_cart_codes else get_or_create_cart(conn, cart_code, grower_id, load_cell, harvest_date)
+    get_or_create_vehicle(conn, truck_id, grower_id)
     storloc_id = find_storage_location(conn, destination_code, grower_id)
 
     external_load_key = build_external_load_key(
