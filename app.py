@@ -23,6 +23,11 @@ app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 from invitations import bp as invitations_bp, ensure_schema as ensure_invitation_schema, csrf_token as access_csrf_token, check_csrf as check_access_csrf, email_ready
 app.register_blueprint(invitations_bp)
+from password_reset import bp as password_reset_bp, ensure_schema as ensure_password_reset_schema, password_version
+app.register_blueprint(password_reset_bp)
+from email_verification import bp as email_verification_bp, ensure_schema as ensure_email_verification_schema, issue_verification
+from invitations import unl_email
+app.register_blueprint(email_verification_bp)
 app.jinja_env.globals['access_csrf_token'] = access_csrf_token
 _access_schema_ready = False
 
@@ -53,9 +58,11 @@ login_manager.init_app(app)
 
 @app.before_request
 def protect_pending_accounts():
+    if request.endpoint in ("password_reset.forgot", "password_reset.reset", "email_verification.account", "email_verification.verify"):
+        ensure_access_schema()
     if not current_user.is_authenticated:
         return None
-    allowed = {"access_pending", "logout", "static", "invitations.accept"}
+    allowed = {"access_pending", "logout", "static", "invitations.accept", "password_reset.forgot", "password_reset.reset", "email_verification.account", "email_verification.verify"}
     if current_user.membership_status != "active" and request.endpoint not in allowed:
         return redirect(url_for("access_pending"))
 
@@ -120,6 +127,8 @@ def ensure_access_schema():
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """)
     ensure_invitation_schema(cur)
+    ensure_password_reset_schema(cur)
+    ensure_email_verification_schema(cur)
     # Tables without an existing Department/Field path need an explicit owner.
     tenant_tables = ("Cart", "Storage_Location", "Delivery_Location", "MarketPriceMonthly", "Delivery")
     for table_name in tenant_tables:
@@ -178,6 +187,8 @@ def load_user(user_id):
     row = cur.fetchone()
     cur.close()
     conn.close()
+    if row and session.get('password_version') != password_version(row['password_hash']):
+        return None
     return User(row, get_membership(user_id)) if row else None
 
 
@@ -200,13 +211,14 @@ def login():
         cur.close()
         conn.close()
 
-        if not user_row or not bcrypt.checkpw(
+        if not user_row or len(password.encode()) > 72 or not bcrypt.checkpw(
             password.encode(), user_row["password_hash"].encode()
         ):
             error = "Invalid username or password"
         else:
             user = User(user_row, get_membership(user_row["id"]))
             login_user(user)
+            session["password_version"] = password_version(user_row["password_hash"])
             return redirect(url_for("dashboard") if user.membership_status == "active" else url_for("access_pending"))
 
     return render_template("login.html", error=error)
@@ -311,58 +323,54 @@ def first_run_setup():
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
     ensure_access_schema()
-    # if already logged in, go to dashboard
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
-
     error = None
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
-        confirm  = request.form.get("confirm_password", "")
-        grower_id = request.form.get("grower_id", "").strip()
-
-        if not username or not grower_id:
-            error = "Username and Grower are required."
-        elif password != confirm:
-            error = "Passwords do not match."
-        elif len(password) < 6:
-            error = "Password must be at least 6 characters."
-        else:
-            pw_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-
-            conn = get_conn()
-            cur = conn.cursor(dictionary=True)
-            # check existing user
-            cur.execute("SELECT id FROM users WHERE username=%s", (username,))
-            exists = cur.fetchone()
-
-            if exists:
-                error = "Username already exists. Please choose another."
-                cur.close(); conn.close()
-            else:
-                cur2 = conn.cursor()
-                cur2.execute("""
-                    INSERT INTO users (username, password_hash, role, is_active)
-                    VALUES (%s, %s, 'user', 1)
-                """, (username, pw_hash))
-                user_id = cur2.lastrowid
-                cur2.execute("""
-                    INSERT INTO grower_memberships (user_id, Grower_ID, role, status)
-                    VALUES (%s, %s, 'viewer', 'pending')
-                """, (user_id, int(grower_id)))
-                conn.commit()
-                cur2.close()
-                cur.close()
-                conn.close()
-
-                return redirect(url_for("login"))
-
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
-    cur.execute("SELECT Grower_ID, Grower_Name FROM Grower ORDER BY Grower_Name")
-    growers = cur.fetchall()
-    cur.close(); conn.close()
+    try:
+        if request.method == "POST":
+            check_access_csrf()
+            username = request.form.get("username", "").strip()
+            password = request.form.get("password", "")
+            confirm = request.form.get("confirm_password", "")
+            grower_id = request.form.get("grower_id", type=int)
+            try:
+                email = unl_email(request.form.get("email", ""))
+                if not username or len(username)>80 or not grower_id:
+                    raise ValueError("Username (up to 80 characters) and Grower are required.")
+                if password != confirm or len(password)<8 or len(password.encode())>72:
+                    raise ValueError("Passwords must match and contain at least eight characters (maximum 72 bytes).")
+                cur.execute("SELECT Grower_ID FROM Grower WHERE Grower_ID=%s", (grower_id,))
+                if not cur.fetchone():
+                    raise ValueError("Select a valid Grower.")
+                cur.execute("SELECT user_id FROM user_emails WHERE email=%s", (email,))
+                if cur.fetchone():
+                    raise ValueError("This email is already registered. Sign in or contact your administrator.")
+                pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+                cur.execute("INSERT INTO users (username,password_hash,role,is_active) VALUES (%s,%s,'user',1)", (username,pw_hash))
+                user_id = cur.lastrowid
+                cur.execute("""INSERT INTO grower_memberships (user_id,Grower_ID,role,status)
+                    VALUES (%s,%s,'viewer','pending')""", (user_id,grower_id))
+                conn.commit()
+                login_user(User({'id':user_id,'username':username,'role':'user','password_hash':pw_hash,'is_active':1},get_membership(user_id)))
+                session['password_version'] = password_version(pw_hash)
+                try:
+                    notice=issue_verification(user_id,email)
+                except ValueError as exc:
+                    notice=str(exc)
+                flash("Account created. Administrator approval is still required. " + notice, "info")
+                return redirect(url_for('email_verification.account'))
+            except ValueError as exc:
+                conn.rollback()
+                error = str(exc)
+            except IntegrityError:
+                conn.rollback()
+                error = "This username is already registered. Choose another or sign in."
+        cur.execute("SELECT Grower_ID, Grower_Name FROM Grower ORDER BY Grower_Name")
+        growers=cur.fetchall()
+    finally:
+        cur.close();conn.close()
     return render_template("signup.html", error=error, growers=growers)
 
 
@@ -612,19 +620,9 @@ def dashboard():
     cur.close()
     conn.close()
 
-    inventory_rows, _, _ = build_inventory_snapshot(crop_year=str(dashboard_year))
-    inventory_by_location = {}
-    for row in inventory_rows:
-        location = row.get("Bin_Code") or row.get("Bin_Name") or "Unassigned"
-        inventory_by_location[location] = inventory_by_location.get(location, 0.0) + _to_float(row.get("Current_Bu"))
-
-    top_inventory = sorted(
-        ((location, max(0.0, bushels)) for location, bushels in inventory_by_location.items()),
-        key=lambda item: item[1],
-        reverse=True
-    )[:8]
-    top_inventory.sort(key=lambda item: storage_sort_key(item[0]))
-
+    _, inventory_summary, _ = build_inventory_snapshot(crop_year=str(dashboard_year))
+    for crop in ("Corn", "Soybeans", "High Moisture Corn"):
+        inventory_summary.setdefault(crop, {"Harvest": 0.0, "Delivered": 0.0, "Inventory": 0.0})
     month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     monthly_bushels = [0.0] * 12
     for row in monthly_rows:
@@ -632,14 +630,13 @@ def dashboard():
         if 0 <= month_index < 12:
             monthly_bushels[month_index] = round(_to_float(row.get("bushels")), 1)
 
-    current_inventory = sum(inventory_by_location.values())
-
     dashboard_data = {
         "year": dashboard_year,
         "total_bushels": _to_float(harvest_totals.get("total_bushels")),
         "load_count": int(harvest_totals.get("load_count") or 0),
         "active_growers": int(grower_totals.get("active_growers") or 0),
-        "current_inventory": current_inventory,
+        "inventory_by_crop": inventory_summary,
+        "unassigned_deliveries": count_unassigned_deliveries(),
         "delivered_bushels": _to_float(delivery_totals.get("delivered_bushels")),
         "delivery_count": int(delivery_totals.get("delivery_count") or 0),
         "user_count": int(user_totals.get("user_count") or 0),
@@ -649,8 +646,8 @@ def dashboard():
         "incomplete_loads": incomplete_loads,
         "monthly_delivery_labels": month_labels,
         "monthly_delivery_bushels": monthly_bushels,
-        "inventory_labels": [item[0] for item in top_inventory],
-        "inventory_bushels": [round(item[1], 1) for item in top_inventory],
+        "inventory_labels": list(inventory_summary),
+        "inventory_bushels": [round(item["Inventory"], 1) for item in inventory_summary.values()],
     }
 
     return render_template("index.html", app_name="GMS", dashboard_data=dashboard_data)
@@ -2604,6 +2601,11 @@ def build_inventory_snapshot(crop_year="", crop_name=""):
     """
     delivery_params = [current_user.grower_id, current_user.grower_id]
 
+    # Attribute sales to the original harvest year, including later deliveries.
+    if crop_year:
+        delivery_q += " AND d.Crop_Year = %s"
+        delivery_params.append(crop_year)
+
     if crop_name:
         delivery_q += " AND (" + INVENTORY_CROP_SQL + ") = %s"
         delivery_params.append(crop_name)
@@ -2910,6 +2912,49 @@ def delivery():
 
     context = build_reconcile_context(start_date, end_date, crop_id)
     return render_template("delivery.html", **context)
+
+
+def count_unassigned_deliveries():
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) FROM Delivery WHERE Grower_ID=%s AND Crop_Year IS NULL",
+                    (current_user.grower_id,))
+        return cur.fetchone()[0]
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route("/delivery/crop-years", methods=["GET", "POST"])
+@login_required
+@editor_required
+def delivery_crop_years():
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        if request.method == "POST":
+            check_access_csrf()
+            year = request.form.get("crop_year", "").strip()
+            delivery_id = request.form.get("delivery_id", "")
+            if not year.isdigit() or not 1900 <= int(year) <= 9999 or not delivery_id.isdigit():
+                abort(400)
+            cur.execute("UPDATE Delivery SET Crop_Year=%s WHERE Delivery_ID=%s AND Grower_ID=%s",
+                        (int(year), int(delivery_id), current_user.grower_id))
+            conn.commit()
+            flash("Delivery crop year saved.", "success")
+            return redirect(url_for("delivery_crop_years"))
+        cur.execute("""SELECT d.Delivery_ID, d.Ticket_Num, d.Delivery_Date, d.Crop_Year,
+                              c.Crop_Name, s.Bin_Code
+                       FROM Delivery d JOIN Crop c ON c.Crop_ID=d.Crop_ID
+                       LEFT JOIN Storage_Location s ON s.StorLoc_ID=d.StorLoc_ID
+                       WHERE d.Grower_ID=%s
+                       ORDER BY d.Crop_Year IS NULL DESC, d.Delivery_Date DESC, d.Delivery_ID DESC""",
+                    (current_user.grower_id,))
+        return render_template("delivery_crop_years.html", rows=cur.fetchall())
+    finally:
+        cur.close()
+        conn.close()
 
 
 
@@ -3274,7 +3319,8 @@ def inventory_report():
     cur.execute("""SELECT DISTINCT fi.Crop_Year
         FROM Field fi JOIN Department d ON fi.Dpt_ID=d.Dpt_ID
         WHERE d.Grower_ID=%s AND fi.Crop_Year IS NOT NULL
-        ORDER BY fi.Crop_Year DESC""", (current_user.grower_id,))
+        UNION SELECT Crop_Year FROM Delivery WHERE Grower_ID=%s AND Crop_Year IS NOT NULL
+        ORDER BY Crop_Year DESC""", (current_user.grower_id, current_user.grower_id))
     crop_years = [r["Crop_Year"] for r in cur.fetchall()]
     cur.execute("""SELECT DISTINCT """ + INVENTORY_CROP_SQL + """ AS Crop_Name
         FROM Crop c
@@ -3298,7 +3344,8 @@ def inventory_report():
         corn_split=corn_split,
         crop_years=crop_years,
         crop_options=crop_options,
-        active_filters=active_filters
+        active_filters=active_filters,
+        unassigned_deliveries=count_unassigned_deliveries()
     )
 
 
@@ -3327,6 +3374,12 @@ def inventory_export():
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Inventory")
         writer.sheets["Inventory"].freeze_panes = "A2"
+        unassigned = count_unassigned_deliveries()
+        pd.DataFrame([{
+            "Crop year": crop_year or "All years",
+            "Unassigned deliveries": unassigned,
+            "Status": "Incomplete: assign delivery crop years" if crop_year and unassigned else "",
+        }]).to_excel(writer, index=False, sheet_name="Report Notes")
     output.seek(0)
 
     return send_file(output, as_attachment=True, download_name="Inventory_Report.xlsx")

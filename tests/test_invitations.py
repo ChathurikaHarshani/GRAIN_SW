@@ -94,6 +94,7 @@ class InvitationsTest(unittest.TestCase):
         self.client=main.app.test_client()
         with self.client.session_transaction() as sess:
             sess['_user_id']='1';sess['_fresh']=True;sess['access_csrf']='test-csrf'
+            sess['password_version']=main.password_version(hashed)
 
     def invite(self, **kwargs):
         data=dict(email='person@unl.edu',role='viewer',csrf_token='test-csrf',action='invite')

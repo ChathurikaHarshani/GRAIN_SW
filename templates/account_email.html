@@ -1,0 +1,10 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GMS email verification</title><style>body{font:16px system-ui;background:#f2f5f2;color:#203027;padding:32px 16px}main{max-width:520px;margin:5vh auto;background:white;padding:32px;border-radius:16px}label{display:block;margin-top:18px}input,button{box-sizing:border-box;width:100%;padding:12px;margin-top:8px;font:inherit}button{background:#28653b;color:white;border:0;border-radius:6px;margin:24px 0}a{color:#28653b}.error{color:#9b2226}</style></head><body><main><h1>Add/Verify Email</h1>
+{% for category,message in get_flashed_messages(with_categories=true) %}<p role="status">{{ message }}</p>{% endfor %}
+{% if notice %}<p role="status">{{ notice }}</p>{% endif %}{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if verified %}<p><strong>Verified:</strong> {{ verified.email }}</p>{% else %}
+<p>Add your @unl.edu address and verify it to enable password recovery for Viewer and Editor accounts.</p>
+{% if pending %}<p>Awaiting verification: {{ pending.email }}</p>{% endif %}
+<form method="post"><input type="hidden" name="csrf_token" value="{{ access_csrf_token() }}"><label for="email">UNL email</label><input id="email" name="email" type="email" maxlength="254" autocomplete="email" value="{{ request.form.get('email',pending.email if pending else '') }}" required><label for="password">Current password</label><input id="password" name="password" type="password" autocomplete="current-password" required><button>Send verification email</button></form>{% endif %}
+<p>Verification does not approve grower access. Admin accounts cannot use email password reset.</p>
+<a href="{{ url_for('dashboard') if current_user.membership_status == 'active' else url_for('access_pending') }}">Back to GMS</a>
+</main></body></html>

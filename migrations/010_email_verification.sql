@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS email_verifications (
+ user_id BIGINT UNSIGNED PRIMARY KEY,
+ email VARCHAR(254) NOT NULL,
+ token_hash CHAR(64) NULL UNIQUE,
+ expires_at DATETIME NOT NULL,
+ requested_at DATETIME NOT NULL,
+ window_started DATETIME NOT NULL,
+ request_count INT NOT NULL DEFAULT 1,
+ FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

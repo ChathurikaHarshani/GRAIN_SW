@@ -15,6 +15,10 @@
 </div>
 
 <!-- Filters -->
+{% if unassigned_deliveries %}
+<div class="alert alert-warning">{{ unassigned_deliveries }} deliveries have no crop year. They are excluded when filtering by year, so those totals are incomplete.
+{% if can_edit %}<a href="{{ url_for('delivery_crop_years') }}">Assign crop years</a>{% endif %}</div>
+{% endif %}
 <form method="GET" class="row g-3 mb-3">
   <div class="col-md-2">
     <label class="form-label ">Crop Year</label>

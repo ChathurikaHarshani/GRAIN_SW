@@ -118,8 +118,14 @@
         <i class="bi bi-box-seam fs-4 text-primary"></i>
         <h6 class="text-muted mb-0">Current Inventory</h6>
       </div>
-      <div class="kpi-number" id="kpiInventory">{{ "{:,.0f}".format(dashboard_data.current_inventory) }}</div>
-      <small class="text-muted">Bushels by storage location</small>
+      {% for crop, totals in dashboard_data.inventory_by_crop.items() %}
+      <div class="d-flex justify-content-between gap-2"><span>{{ crop }}</span><strong>{{ "{:,.1f}".format(totals.Inventory) }} bu</strong></div>
+      {% endfor %}
+      <small class="text-muted">Crop year {{ dashboard_data.year }} </small>
+      {% if dashboard_data.unassigned_deliveries %}
+      <p class="text-warning mt-2 mb-0">{{ dashboard_data.unassigned_deliveries }} deliveries need a crop year. Totals are incomplete.</p>
+      {% if can_edit %}<a href="{{ url_for('delivery_crop_years') }}">Assign crop years</a>{% endif %}
+      {% endif %}
     </div>
   </div>
 </div>
@@ -191,7 +197,7 @@
   <div class="col-lg-6">
     <div class="main-content shadow-sm h-100 gms-card">
       <div class="d-flex align-items-center justify-content-between mb-2">
-        <h5 class="fw-bold mb-0">Inventory by Location</h5>
+        <h5 class="fw-bold mb-0">Inventory by Crop · {{ dashboard_data.year }}</h5>
         <span class="badge text-bg-light border">Live data</span>
       </div>
       <canvas id="inventoryChart" height="120"></canvas>
@@ -250,7 +256,7 @@
     options: {
       responsive: true,
       plugins: { legend: { display: true } },
-      scales: { y: { beginAtZero: true, min: 0 } }
+      scales: { y: { beginAtZero: true } }
     }
   });
 </script>

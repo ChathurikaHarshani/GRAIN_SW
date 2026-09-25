@@ -170,29 +170,33 @@ def validate_mappings(rows: list[DeliveryRow]) -> None:
         raise ValueError("Unresolved mappings found: " + "; ".join(parts))
 
 
-def build_insert_sql(rows: list[DeliveryRow]) -> str:
+def build_insert_sql(rows: list[DeliveryRow], crop_year: int, grower_id: int) -> str:
+    if not isinstance(grower_id,int) or grower_id <= 0:
+        raise ValueError("An explicit positive Grower ID is required")
+    if not 1900 <= crop_year <= 9999:
+        raise ValueError("A valid original crop year is required")
     statements: list[str] = []
 
     statements.append("START TRANSACTION;")
     statements.append(
-        "INSERT INTO delivery_location (DelLoc_code, Location)\n"
-        "SELECT 'ANF', 'Feedmill Bins (ANF)'\n"
+        "INSERT INTO Delivery_Location (DelLoc_code, Location, Grower_ID)\n"
+        f"SELECT 'ANF', 'Feedmill Bins (ANF)', {grower_id}\n"
         "WHERE NOT EXISTS (\n"
-        "  SELECT 1 FROM delivery_location WHERE DelLoc_code = 'ANF'\n"
+        f"  SELECT 1 FROM Delivery_Location WHERE DelLoc_code = 'ANF' AND Grower_ID={grower_id}\n"
         ");"
     )
 
     for row in rows:
         statements.append(
-            "INSERT INTO delivery (\n"
-            "  Ticket_Num, Delivery_Date, Crop_ID, DelLoc_ID, StorLoc_ID,\n"
+            "INSERT INTO Delivery (\n"
+            "  Grower_ID, Ticket_Num, Delivery_Date, Crop_Year, Crop_ID, DelLoc_ID, StorLoc_ID,\n"
             "  MC, Gross_Weight, Tare_Weight, Bushels,\n"
             "  Delivery_Status, Price, Gross_Sale, Sale_Discounts, Comments\n"
             ")\nVALUES (\n"
-            f"  {sql_num(row.ticket_num)}, {sql_quote(row.delivery_date)},\n"
-            f"  (SELECT Crop_ID FROM crop WHERE Crop_Code = {sql_quote(row.crop_code)} ORDER BY Crop_ID LIMIT 1),\n"
-            f"  (SELECT DelLoc_ID FROM delivery_location WHERE DelLoc_code = {sql_quote(row.delivery_to_code)} ORDER BY DelLoc_ID LIMIT 1),\n"
-            f"  (SELECT StorLoc_ID FROM storage_location WHERE Bin_Code = {sql_quote(row.storage_code)} ORDER BY StorLoc_ID LIMIT 1),\n"
+            f"  {grower_id}, {sql_num(row.ticket_num)}, {sql_quote(row.delivery_date)}, {crop_year},\n"
+            f"  (SELECT Crop_ID FROM Crop WHERE Crop_Code = {sql_quote(row.crop_code)} ORDER BY Crop_ID LIMIT 1),\n"
+            f"  (SELECT DelLoc_ID FROM Delivery_Location WHERE DelLoc_code = {sql_quote(row.delivery_to_code)} AND Grower_ID={grower_id} ORDER BY DelLoc_ID LIMIT 1),\n"
+            f"  (SELECT StorLoc_ID FROM Storage_Location WHERE Bin_Code = {sql_quote(row.storage_code)} AND Grower_ID={grower_id} ORDER BY StorLoc_ID LIMIT 1),\n"
             f"  {sql_num(row.mc, 2)}, {sql_num(row.gross_weight, 2)}, {sql_num(row.tare_weight, 2)}, {sql_num(row.bushels, 2)},\n"
             f"  {sql_quote(row.delivery_status)}, {sql_num(row.price, 4)}, {sql_num(row.gross_sale, 2)}, {sql_num(row.sale_discounts, 2)}, {sql_quote(row.comments)}\n"
             ");"
@@ -203,7 +207,12 @@ def build_insert_sql(rows: list[DeliveryRow]) -> str:
 
 
 def main() -> None:
-    target = (sys.argv[1] if len(sys.argv) > 1 else "2025").strip().lower()
+    import argparse
+    parser=argparse.ArgumentParser(description='Generate delivery SQL for an explicitly selected grower and harvest year.')
+    parser.add_argument('year',choices=['2024','2025'])
+    parser.add_argument('--grower-id',type=int,required=True)
+    args=parser.parse_args()
+    target = args.year
 
     if target == "2024":
         workbook_path = WORKBOOK_2024
@@ -217,7 +226,7 @@ def main() -> None:
     rows = read_delivery_rows(workbook_path)
     validate_mappings(rows)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(build_insert_sql(rows), encoding="utf-8")
+    output_path.write_text(build_insert_sql(rows, int(target), args.grower_id), encoding="utf-8")
 
     print(f"Workbook: {workbook_path}")
     print(f"Generated {len(rows)} delivery inserts.")

@@ -88,3 +88,77 @@ is required. A service/server restart may interrupt an active import; its
 status changes to interrupted after three minutes without a heartbeat.
 Completed files may already have committed, so inspect the output before
 retrying. Do not run a command-line import concurrently with a website job.
+# Delivery crop years and inventory
+
+Apply `migrations/008_delivery_crop_year.sql` once before deploying this version.
+Delivery crop year means the original harvest year, independent of delivery date.
+Existing deliveries are left unassigned rather than guessed. An editor can open
+Delivery → Assign crop years to review and save each original crop year.
+Crop-year inventory excludes unassigned deliveries and displays an incomplete-total
+warning until assignments are complete. All-years inventory still includes them.
+The dashboard shows harvest minus assigned deliveries separately by crop for its
+displayed crop year. The delivery import generator records the selected workbook
+crop year; other importers must populate `Delivery.Crop_Year` explicitly.
+Carryover transfers are not implemented; do not enter them as new harvest.
+
+## Viewer and Editor password reset
+
+The login page has a Forgot password link. Recovery requires an active Viewer or
+Editor membership and a verified @unl.edu email (recorded when an invitation is
+accepted). Accounts marked admin globally or in any grower membership cannot
+request or redeem reset links. Admin status is checked again at redemption.
+Legacy users can sign in and use Add/Verify Email before requesting recovery. Users who cannot sign in and have no verified email need administrator assistance.
+
+Deploy password_reset.py, templates/password_reset.html, the login template,
+app.py, and migrations/009_password_resets.sql together. Migration 008 belongs to
+separate delivery work; password recovery does not depend on it. The new reset
+table is created by access schema initialization, including on recovery pages.
+The existing GMS_MAIL_FROM, GMS_PUBLIC_URL and GMS_SENDMAIL_PATH settings are reused.
+
+Links expire after 30 minutes and are single-use; a newer request replaces the
+older link. Requests are limited to one per minute and five per hour per eligible
+account. Responses do not reveal whether an email exists or is an Admin account.
+Password changes invalidate other login sessions. Deploying this version also
+requires already-signed-in users to sign in again to establish session binding.
+No reset email is sent automatically during deployment or testing.
+
+## Signup and existing-account email verification
+
+Signup now requires an @unl.edu address. After creating an account, GMS sends a
+24-hour verification link and opens Add/Verify Email. The new grower membership
+remains pending until an administrator approves it; verification never grants or
+changes membership roles. Admin accounts remain excluded from password recovery.
+
+Existing users can open **Add/Verify Email** from the account menu (or from Access
+pending), enter their current password and UNL address, then confirm the emailed
+link while signed in to that same account. If signed out, sign in first and reopen
+the email link. Already-verified addresses are displayed but cannot be replaced
+through this form. Users who cannot sign in and never verified an email still
+need administrator assistance.
+
+Deploy email_verification.py, templates/account_email.html, templates/verify_email.html,
+the updated signup/base/access_pending templates and app.py, and
+migrations/010_email_verification.sql alongside the password-reset changes.
+Access-schema initialization creates the new pending-verification table.
+Existing user_emails records are preserved. Unverified email addresses are kept
+separately and cannot be used for password recovery. No new email settings are
+needed; the existing local sendmail configuration is reused.
+
+Requests are limited to one per minute and five per hour per account. Resending
+replaces the prior single-use link. Email submission failures leave the account
+pending verification and allow a later retry from Add/Verify Email. Email links
+require explicit confirmation, so automated email-link scanners cannot verify an
+account. Tests mock email delivery and use isolated MySQL test tables.
+
+## September 25 release deployment
+
+See DEPLOYMENT_2026_09_25.md for the reviewed release procedure. Use
+`python scripts/deploy_account_updates.py --apply --check-mail` on production to
+apply migrations 008–010 idempotently before restarting the app. This command
+preserves existing data, adds only missing schema, validates the existing mail
+configuration, and sends no messages. Do not rerun the older vehicle cleanup.
+
+The local delivery SQL generator now requires an explicit grower:
+`python generate_delivery_import_sql.py 2025 --grower-id YOUR_GROWER_ID`.
+It uses the Linux table names and scopes location lookups to that grower.
+Generated SQL remains a manual import, not part of release deployment.

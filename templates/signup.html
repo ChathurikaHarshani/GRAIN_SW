@@ -199,6 +199,12 @@
             {% endif %}
 
             <form method="post" class="mb-3">
+              <input type="hidden" name="csrf_token" value="{{ access_csrf_token() }}">
+              <div class="mb-3">
+                <label class="form-label fw-semibold" for="signup-email">UNL email</label>
+                <input id="signup-email" name="email" type="email" autocomplete="email" maxlength="254" class="form-control" placeholder="name@unl.edu" value="{{ request.form.get('email','') }}" required>
+                <div class="form-text">Verify this address using the link we email you. Verified email is required for Viewer and Editor password recovery.</div>
+              </div>
               <div class="mb-3">
                 <label class="form-label fw-semibold">Grower</label>
                 <select name="grower_id" class="form-select" required>
