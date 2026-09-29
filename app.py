@@ -3,6 +3,7 @@ from db import get_conn
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import calendar
+import math
 import re
 from functools import wraps
 from dotenv import load_dotenv
@@ -435,9 +436,9 @@ def manage_users():
 def season_setup():
     default_target = date.today().year
     target_year = request.values.get("target_year", str(default_target)).strip()
-    source_year = request.values.get("source_year", str(int(target_year or default_target) - 1)).strip()
     try:
         target_year_int = int(target_year)
+        source_year = request.values.get("source_year", str(target_year_int - 1)).strip()
         source_year_int = int(source_year)
         if not 1900 <= target_year_int <= 2100 or not 1900 <= source_year_int <= 2100:
             raise ValueError
@@ -1728,6 +1729,10 @@ def harvest_query():
     selected_storage = request.args.get("storloc_id", "").strip()
     selected_year = request.args.get("crop_year", "").strip()
     selected_edit_id = request.args.get("edit_id", "").strip()
+    if request.method == "POST":
+        selected_edit_id = request.form.get("harvest_id", "").strip()
+    if selected_edit_id and not selected_edit_id.isdigit():
+        abort(400, description="Choose a valid harvest load.")
     needs_attention = request.args.get("needs_attention", "") == "1"
 
     # ---------------- Dropdown data ----------------
@@ -1798,23 +1803,25 @@ def harvest_query():
     if selected_edit_id:
         cur.execute("""
             SELECT
-              Harvest_ID,
-              Cart_ID,
-              Field_ID,
-              Crop_ID,
-              StorLoc_ID,
-              Load_Num,
-              Harvest_Date,
-              MC,
-              Gross_Weight,
-              Tare_Weight,
-              Note
+              h.Harvest_ID,
+              h.Cart_ID,
+              h.Field_ID,
+              h.Crop_ID,
+              h.StorLoc_ID,
+              h.Load_Num,
+              h.Harvest_Date,
+              h.MC,
+              h.Gross_Weight,
+              h.Tare_Weight,
+              h.Note
             FROM Harvest h JOIN Field f ON f.Field_ID=h.Field_ID JOIN Department d ON d.Dpt_ID=f.Dpt_ID
-            WHERE Harvest_ID = %s AND d.Grower_ID=%s;
+            WHERE h.Harvest_ID = %s AND d.Grower_ID=%s;
         """, (selected_edit_id, current_user.grower_id))
         edit_load = cur.fetchone()
         if not edit_load:
-            selected_edit_id = ""
+            cur.close()
+            conn.close()
+            abort(404)
 
 
     # ---------------- POST: insert a new Harvest row ----------------
@@ -1831,8 +1838,20 @@ def harvest_query():
         tare = request.form.get("tare", "").strip()
         note = request.form.get("note", "").strip()
 
+        try:
+            for value in (field_id, storloc_id, crop_id, cart_id):
+                if value and int(value) <= 0:
+                    raise ValueError
+            if harvest_date:
+                date.fromisoformat(harvest_date)
+            for value in (mc, gross, tare):
+                if value and not math.isfinite(float(value)):
+                    raise ValueError
+        except ValueError:
+            error = "Choose valid field, storage, crop, and cart values, a valid date, and finite numeric weights and moisture."
+
         duplicate_load = False
-        if load_num and harvest_date and field_id and cart_id:
+        if not error and load_num and harvest_date and field_id and cart_id:
             cur.execute("""
                 SELECT h.Harvest_ID FROM Harvest h
                 JOIN Field f ON f.Field_ID=h.Field_ID
@@ -1843,7 +1862,9 @@ def harvest_query():
             """, (current_user.grower_id, load_num, harvest_date, field_id, cart_id, int(harvest_id or 0)))
             duplicate_load = cur.fetchone() is not None
 
-        if not (load_num and harvest_date and field_id and crop_id and cart_id):
+        if error:
+            pass
+        elif not (load_num and harvest_date and field_id and crop_id and cart_id):
             error = "Load, Date, Field, Crop, and Cart are required."
         elif not harvest_id and not storloc_id:
             error = "Storage is required for new loads."
@@ -1921,6 +1942,8 @@ def harvest_query():
                     ))
                 conn.commit()
                 cur2.close()
+                cur.close()
+                conn.close()
 
                 session["harvest_entry_defaults"] = {
                     "field_id": field_id,
@@ -1998,6 +2021,13 @@ def harvest_query():
 
     entry_defaults = dict(session.get("harvest_entry_defaults", {}))
     if request.method == "POST" and error:
+        if edit_load:
+            for column, form_key in (("Load_Num", "load_num"), ("Harvest_Date", "harvest_date"),
+                                     ("Field_ID", "field_id"), ("StorLoc_ID", "storloc_id"),
+                                     ("Crop_ID", "crop_id"), ("Cart_ID", "cart_id"),
+                                     ("MC", "mc"), ("Gross_Weight", "gross"),
+                                     ("Tare_Weight", "tare"), ("Note", "note")):
+                edit_load[column] = request.form.get(form_key, "")
         entry_defaults.update({
             "field_id": request.form.get("field_id", ""),
             "storloc_id": request.form.get("storloc_id", ""),
@@ -2184,26 +2214,22 @@ def pace():
     cur = conn.cursor(dictionary=True)
     harvest_bu_sql = calculated_bushels_sql("h", "c")
 
-    # Optional: earliest harvest date (like "1st Harvest Date" in Excel)
+    # Start with the latest crop year that has harvest activity for this grower.
+    today = date.today()
     cur.execute("""SELECT MIN(h.Harvest_Date) AS first_date FROM Harvest h
         JOIN Field f ON f.Field_ID=h.Field_ID JOIN Department d ON d.Dpt_ID=f.Dpt_ID
-        WHERE d.Grower_ID=%s""", (current_user.grower_id,))
-    first_date = cur.fetchone()["first_date"]
+        WHERE d.Grower_ID=%s AND h.Harvest_Date <= %s
+        GROUP BY f.Crop_Year
+        ORDER BY f.Crop_Year DESC
+        LIMIT 1""", (current_user.grower_id, today))
+    first_date = (cur.fetchone() or {}).get("first_date")
 
-    # Build a date window (Excel shows lots of days; we can default to 60 days)
-    # You can also pass ?start=YYYY-MM-DD&end=YYYY-MM-DD
+    # Date controls can override either default independently.
     start = request.args.get("start")
     end = request.args.get("end")
 
-    if not start:
-        start_date = first_date if first_date else date.today()
-    else:
-        start_date = date.fromisoformat(start)
-
-    if not end:
-        end_date = start_date + timedelta(days=60)
-    else:
-        end_date = date.fromisoformat(end)
+    start_date, end_date = report_date_range(
+        start, end, first_date or today, today)
 
     # Pace logic (matches the workbook intent):
     # Bushels = SUM(Bushels) by Date
@@ -2281,6 +2307,19 @@ def pace():
         totals=totals
     )
 
+
+
+def report_date_range(start, end, default_start, default_end=None, days=0):
+    """Handle empty date controls and reject invalid/reversed report ranges."""
+    try:
+        start_date = date.fromisoformat(start) if start else default_start
+        end_date = (date.fromisoformat(end) if end else
+                    default_end if default_end is not None else start_date + timedelta(days=days))
+        if start_date > end_date:
+            raise ValueError
+    except (ValueError, OverflowError):
+        abort(400, description="Choose valid dates with Start on or before End.")
+    return start_date, end_date
 
 
 def _to_float(x):
@@ -2732,8 +2771,7 @@ def billing():
     start_str = request.args.get("start", start_default.isoformat())
     end_str = request.args.get("end", end_default.isoformat())
 
-    start_date = date.fromisoformat(start_str)
-    end_date = date.fromisoformat(end_str)
+    start_date, end_date = report_date_range(start_str, end_str, start_default, end_default)
     month_name = calendar.month_name[start_date.month]
 
     # Resolve IDs from codes (for SQL filtering)
@@ -2868,8 +2906,8 @@ def reconcile():
     end = request.args.get("end")
     crop_id = request.args.get("crop_id", "")
 
-    start_date = date.fromisoformat(start) if start else (date.today() - timedelta(days=30))
-    end_date = date.fromisoformat(end) if end else date.today()
+    start_date, end_date = report_date_range(
+        start, end, date.today() - timedelta(days=30), date.today())
 
     context = build_reconcile_context(start_date, end_date, crop_id)
     return render_template("reconcile.html", **context)
@@ -2907,8 +2945,8 @@ def delivery():
     start = request.args.get("start")
     end = request.args.get("end")
     crop_id = request.args.get("crop_id", "")
-    start_date = date.fromisoformat(start) if start else (date.today() - timedelta(days=30))
-    end_date = date.fromisoformat(end) if end else date.today()
+    start_date, end_date = report_date_range(
+        start, end, date.today() - timedelta(days=30), date.today())
 
     context = build_reconcile_context(start_date, end_date, crop_id)
     return render_template("delivery.html", **context)

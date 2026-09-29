@@ -79,7 +79,8 @@
   <div class="col-md-4">
     {% if current_user.is_admin %}<a class="text-decoration-none text-reset" href="{{ url_for('manage_users') }}">{% endif %}
     <div class="main-content shadow-sm h-100 gms-card border-start {{ 'border-warning' if dashboard_data.pending_users else 'border-success' }} border-4">
-      <div class="text-muted small">User access</div><div class="fs-3 fw-bold">{{ dashboard_data.pending_users }}</div><div>pending requests</div>
+      <div class="text-muted small">Access approvals</div><div class="fs-3 fw-bold">{{ dashboard_data.pending_users }}</div><div>users awaiting admin approval</div>
+      <div class="text-muted small mt-2">Invitations awaiting acceptance are listed separately in User Access.</div>
     </div>{% if current_user.is_admin %}</a>{% endif %}
   </div>
   <div class="col-md-4"><a class="text-decoration-none text-reset" href="{{ url_for('harvest_query', crop_year=dashboard_data.year, needs_attention='1') }}">
