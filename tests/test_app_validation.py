@@ -24,13 +24,13 @@ class AppValidationTest(unittest.TestCase):
         self.client = main.app.test_client()
         self.form = dict(harvest_id='7', load_num='42', harvest_date='2026-09-29',
                          field_id='1', crop_id='1', cart_id='1', storloc_id='1',
-                         gross='56000', tare='1000', mc='15', note='Keep this note')
+                         gross='56000', tare='1000', mc='15', truck_id='460A', note='Keep this note')
 
     def query_result(self, sql, params=()):
         self.cur.fetchone.return_value = None
         if 'WHERE h.Harvest_ID = %s' in sql:
             self.cur.fetchone.return_value = dict(Harvest_ID=7, Field_ID=1, Crop_ID=1,
-                Cart_ID=1, StorLoc_ID=1, Load_Num='41', Harvest_Date=date(2026, 9, 28),
+                Cart_ID=1, Truck_ID='496A', StorLoc_ID=1, Load_Num='41', Harvest_Date=date(2026, 9, 28),
                 MC=14, Gross_Weight=55000, Tare_Weight=1000, Note='Old note')
         elif 'SELECT f.Dpt_ID' in sql:
             self.cur.fetchone.return_value = dict(Dpt_ID=1)
@@ -44,13 +44,14 @@ class AppValidationTest(unittest.TestCase):
             self.cur.fetchone.return_value = dict(first_date=None)
 
     def test_rejected_edit_keeps_id_and_entered_values(self):
-        self.form['cart_id'] = ''
+        self.form['field_id'] = ''
         response = self.client.post('/harvest-query', data=self.form)
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'name="harvest_id" value="7"', response.data)
         self.assertIn(b'Update Load', response.data)
         self.assertIn(b'value="Keep this note"', response.data)
         self.assertIn(b'value="56000"', response.data)
+        self.assertIn(b'value="460A"', response.data)
         self.conn.commit.assert_not_called()
 
     def test_invalid_harvest_numbers_and_dates_show_validation(self):
@@ -71,6 +72,21 @@ class AppValidationTest(unittest.TestCase):
         self.assertFalse(any('INSERT INTO Harvest' in sql for sql in queries))
         self.conn.commit.assert_called_once()
         self.conn.close.assert_called_once()
+
+    def test_edit_form_shows_current_truck(self):
+        response = self.client.get('/harvest-query?edit_id=7')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'id="entry-truck" name="truck_id"', response.data)
+        self.assertIn(b'value="496A"', response.data)
+
+    def test_truck_update_allows_unassigned_cart(self):
+        self.form['cart_id'] = ''
+        response = self.client.post('/harvest-query', data=self.form)
+        self.assertEqual(response.status_code, 302)
+        update = next(call for call in self.cur.execute.call_args_list
+                      if 'UPDATE Harvest' in call.args[0])
+        self.assertEqual(update.args[1][:2], (None, '460A'))
+        self.conn.commit.assert_called_once()
 
     def test_invalid_season_year_returns_400_before_database(self):
         response = self.client.get('/season-setup?target_year=bad')

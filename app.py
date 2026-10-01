@@ -1805,6 +1805,7 @@ def harvest_query():
             SELECT
               h.Harvest_ID,
               h.Cart_ID,
+              h.Truck_ID,
               h.Field_ID,
               h.Crop_ID,
               h.StorLoc_ID,
@@ -1833,6 +1834,7 @@ def harvest_query():
         storloc_id = request.form.get("storloc_id", "").strip()
         crop_id = request.form.get("crop_id", "").strip()
         cart_id = request.form.get("cart_id", "").strip()
+        truck_id = request.form.get("truck_id", edit_load.get("Truck_ID") or "" if edit_load else "").strip()
         mc = request.form.get("mc", "").strip()
         gross = request.form.get("gross", "").strip()
         tare = request.form.get("tare", "").strip()
@@ -1850,6 +1852,9 @@ def harvest_query():
         except ValueError:
             error = "Choose valid field, storage, crop, and cart values, a valid date, and finite numeric weights and moisture."
 
+        if len(truck_id) > 100:
+            error = "Truck must be 100 characters or fewer."
+
         duplicate_load = False
         if not error and load_num and harvest_date and field_id and cart_id:
             cur.execute("""
@@ -1864,8 +1869,10 @@ def harvest_query():
 
         if error:
             pass
-        elif not (load_num and harvest_date and field_id and crop_id and cart_id):
-            error = "Load, Date, Field, Crop, and Cart are required."
+        elif not (load_num and harvest_date and field_id and crop_id):
+            error = "Load, Date, Field, and Crop are required."
+        elif not harvest_id and not cart_id:
+            error = "Cart is required for new loads."
         elif not harvest_id and not storloc_id:
             error = "Storage is required for new loads."
         elif duplicate_load:
@@ -1879,9 +1886,10 @@ def harvest_query():
             else:
                 dpt_id = row["Dpt_ID"]
 
-                cur.execute("SELECT Cart_ID FROM Cart WHERE Cart_ID=%s AND Grower_ID=%s", (cart_id, current_user.grower_id))
-                if not cur.fetchone():
-                    abort(400)
+                if cart_id:
+                    cur.execute("SELECT Cart_ID FROM Cart WHERE Cart_ID=%s AND Grower_ID=%s", (cart_id, current_user.grower_id))
+                    if not cur.fetchone():
+                        abort(400)
                 if storloc_id:
                     cur.execute("SELECT StorLoc_ID FROM Storage_Location WHERE StorLoc_ID=%s AND Grower_ID=%s", (storloc_id, current_user.grower_id))
                     if not cur.fetchone():
@@ -1909,6 +1917,7 @@ def harvest_query():
                     cur2.execute("""
                         UPDATE Harvest
                         SET Cart_ID = %s,
+                            Truck_ID = %s,
                             Field_ID = %s,
                             Crop_ID = %s,
                             Dpt_ID = %s,
@@ -1924,20 +1933,20 @@ def harvest_query():
                           SELECT f.Field_ID FROM Field f JOIN Department d ON d.Dpt_ID=f.Dpt_ID WHERE d.Grower_ID=%s
                         );
                     """, (
-                        int(cart_id), int(field_id), int(crop_id), int(dpt_id), storloc_val,
+                        (int(cart_id) if cart_id else None), (truck_id or None), int(field_id), int(crop_id), int(dpt_id), storloc_val,
                         load_num, harvest_date, mc_val, gross_val, tare_val, bushels_val,
                         (note if note else None), int(harvest_id), current_user.grower_id
                     ))
                 else:
                     cur2.execute("""
                         INSERT INTO Harvest
-                          (Cart_ID, Field_ID, Crop_ID, Dpt_ID, StorLoc_ID,
+                          (Cart_ID, Truck_ID, Field_ID, Crop_ID, Dpt_ID, StorLoc_ID,
                            Load_Num, Harvest_Date, MC, Gross_Weight, Tare_Weight, Bushels, Note)
                         VALUES
-                          (%s, %s, %s, %s, %s,
+                          (%s, %s, %s, %s, %s, %s,
                            %s, %s, %s, %s, %s, %s, %s);
                     """, (
-                        int(cart_id), int(field_id), int(crop_id), int(dpt_id), storloc_val,
+                        (int(cart_id) if cart_id else None), (truck_id or None), int(field_id), int(crop_id), int(dpt_id), storloc_val,
                         load_num, harvest_date, mc_val, gross_val, tare_val, bushels_val, (note if note else None)
                     ))
                 conn.commit()
@@ -1950,6 +1959,7 @@ def harvest_query():
                     "storloc_id": storloc_id,
                     "crop_id": crop_id,
                     "cart_id": cart_id,
+                    "truck_id": truck_id,
                 }
                 flash(f"Harvest load {load_num} {'updated' if harvest_id else 'saved'} successfully.", "success")
 
@@ -2025,6 +2035,7 @@ def harvest_query():
             for column, form_key in (("Load_Num", "load_num"), ("Harvest_Date", "harvest_date"),
                                      ("Field_ID", "field_id"), ("StorLoc_ID", "storloc_id"),
                                      ("Crop_ID", "crop_id"), ("Cart_ID", "cart_id"),
+                                     ("Truck_ID", "truck_id"),
                                      ("MC", "mc"), ("Gross_Weight", "gross"),
                                      ("Tare_Weight", "tare"), ("Note", "note")):
                 edit_load[column] = request.form.get(form_key, "")
@@ -2033,6 +2044,7 @@ def harvest_query():
             "storloc_id": request.form.get("storloc_id", ""),
             "crop_id": request.form.get("crop_id", ""),
             "cart_id": request.form.get("cart_id", ""),
+            "truck_id": truck_id,
             "load_num": request.form.get("load_num", ""),
             "harvest_date": request.form.get("harvest_date", ""),
         })

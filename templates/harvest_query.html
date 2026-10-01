@@ -172,9 +172,17 @@
     </div>
 
     <div class="col-md-2">
+      <label class="form-label" for="entry-truck">Truck</label>
+      <input class="form-control" id="entry-truck" name="truck_id" list="entry-trucks" maxlength="100" value="{{ (edit_load.Truck_ID or '') if edit_load else (entry_defaults.truck_id or '') }}">
+      <datalist id="entry-trucks">
+        {% for truck in trucks %}<option value="{{ truck.Truck_ID }}"></option>{% endfor %}
+      </datalist>
+    </div>
+
+    <div class="col-md-2">
       <label class="form-label">Cart</label>
-      <select class="form-select" name="cart_id" required>
-        <option value="">-- Select Cart --</option>
+      <select class="form-select" name="cart_id" {% if not edit_load %}required{% endif %}>
+        <option value="">{{ 'Unassigned' if edit_load else '-- Select Cart --' }}</option>
         {% for c in carts %}
           <option value="{{ c.Cart_ID }}" {% if (edit_load and edit_load.Cart_ID|string == c.Cart_ID|string) or (not edit_load and entry_defaults.cart_id|string == c.Cart_ID|string) %}selected{% endif %}>
             {{ c.Cart_Name }}
