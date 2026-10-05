@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Add Delivery | GMS{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h1 class="mb-3">Add Delivery</h1>
+  <p class="text-muted">Enter a delivery ticket. Required fields are marked *.</p>
+  {% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
+  {% if not destinations or not storages %}
+    <div class="alert alert-info">Ask an administrator to add delivery and storage locations in Farm Setup before saving a delivery.</div>
+  {% endif %}
+  <form method="post" class="row g-3">
+    <input type="hidden" name="csrf_token" value="{{ access_csrf_token() }}">
+    {% for key, label, type, minimum, maximum in [
+      ('ticket_num', 'Ticket number', 'number', '1', '2147483647'),
+      ('delivery_date', 'Delivery date', 'date', '', ''),
+      ('crop_year', 'Crop year', 'number', '1900', '9999')] %}
+    <div class="col-md-4">
+      <label class="form-label" for="{{ key }}">{{ label }} *</label>
+      <input class="form-control" id="{{ key }}" name="{{ key }}" type="{{ type }}" value="{{ form.get(key, '') }}" {% if minimum %}min="{{ minimum }}" max="{{ maximum }}"{% endif %} required>
+      {% if key == 'crop_year' %}<div class="form-text">Original harvest year, even when delivered in a later year.</div>{% endif %}
+    </div>
+    {% endfor %}
+    {% for key, label, items, id, code, name in [
+      ('crop_id', 'Crop', crops, 'Crop_ID', '', 'Crop_Name'),
+      ('delloc_id', 'Delivered to', destinations, 'DelLoc_ID', 'DelLoc_code', 'Location'),
+      ('storloc_id', 'Source storage', storages, 'StorLoc_ID', 'Bin_Code', 'Bin_Name')] %}
+    <div class="col-md-4">
+      <label class="form-label" for="{{ key }}">{{ label }} *</label>
+      <select class="form-select" id="{{ key }}" name="{{ key }}" required>
+        <option value="">-- Select {{ label }} --</option>
+        {% for item in items %}<option value="{{ item[id] }}" {% if form.get(key, '') == item[id]|string %}selected{% endif %}>{{ (item[code] ~ ' - ') if code and item[code] else '' }}{{ item[name] }}</option>{% endfor %}
+      </select>
+    </div>
+    {% endfor %}
+    <div class="col-12"><h2 class="h5 mt-2">Quantity</h2><p class="text-muted mb-0">Enter gross and tare weights to calculate moisture-adjusted bushels, or leave both weights blank and enter ticket bushels. Use 0 tare for a net weight.</p></div>
+    {% for key, label, step, maximum in [
+      ('mc', 'Moisture (%)', '0.01', '99.99'),
+      ('gross', 'Gross weight (lb)', '0.01', '9999999999.99'),
+      ('tare', 'Tare weight (lb)', '0.01', '9999999999.99'),
+      ('bushels', 'Ticket bushels (without weights)', '0.01', '9999999999.99')] %}
+    <div class="col-md-3">
+      <label class="form-label" for="{{ key }}">{{ label }}</label>
+      <input class="form-control" type="number" id="{{ key }}" name="{{ key }}" step="{{ step }}" min="0" max="{{ maximum }}" value="{{ form.get(key, '') }}">
+    </div>
+    {% endfor %}
+    <div class="col-12"><h2 class="h5 mt-2">Sale information (optional)</h2><p class="text-muted mb-0">If gross sale is blank, it is calculated from bushels × price. Discounts are subtracted from gross sale.</p></div>
+    {% for key, label, step, maximum in [
+      ('price', 'Price ($/bu)', '0.0001', '999999.9999'),
+      ('gross_sale', 'Gross sale ($)', '0.01', '9999999999.99'),
+      ('discounts', 'Sale discounts ($)', '0.01', '9999999999.99')] %}
+    <div class="col-md-4">
+      <label class="form-label" for="{{ key }}">{{ label }}</label>
+      <input class="form-control" type="number" id="{{ key }}" name="{{ key }}" step="{{ step }}" min="0" max="{{ maximum }}" value="{{ form.get(key, '') }}">
+    </div>
+    {% endfor %}
+    <div class="col-12">
+      <label class="form-label" for="comments">Comments</label>
+      <textarea class="form-control" id="comments" name="comments" maxlength="255" rows="2">{{ form.get('comments', '') }}</textarea>
+    </div>
+    <div class="col-12">
+      <button class="btn btn-success" type="submit">Save Delivery</button>
+      <a class="btn btn-outline-secondary ms-2" href="{{ url_for('delivery') }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

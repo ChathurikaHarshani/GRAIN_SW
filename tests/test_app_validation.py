@@ -28,6 +28,9 @@ class AppValidationTest(unittest.TestCase):
 
     def query_result(self, sql, params=()):
         self.cur.fetchone.return_value = None
+        self.cur.fetchall.return_value = []
+        if 'FROM Vehicles WHERE Grower_ID=%s' in sql:
+            self.cur.fetchall.return_value = [dict(Vehicle_Code='460A', Vehicle_Name='Grain truck')]
         if 'WHERE h.Harvest_ID = %s' in sql:
             self.cur.fetchone.return_value = dict(Harvest_ID=7, Field_ID=1, Crop_ID=1,
                 Cart_ID=1, Truck_ID='496A', StorLoc_ID=1, Load_Num='41', Harvest_Date=date(2026, 9, 28),
@@ -86,6 +89,25 @@ class AppValidationTest(unittest.TestCase):
         update = next(call for call in self.cur.execute.call_args_list
                       if 'UPDATE Harvest' in call.args[0])
         self.assertEqual(update.args[1][:2], (None, '460A'))
+        self.conn.commit.assert_called_once()
+
+    def test_truck_options_come_from_growers_vehicles(self):
+        response = self.client.get('/harvest-query?edit_id=7')
+        self.assertIn(b'460A - Grain truck', response.data)
+        self.assertIn(b'496A (existing truck)', response.data)
+        self.assertNotIn(b'<datalist', response.data)
+        query = next(call for call in self.cur.execute.call_args_list
+                     if 'FROM Vehicles WHERE Grower_ID=%s' in call.args[0])
+        self.assertEqual(query.args[1], (1,))
+
+    def test_unknown_truck_is_rejected(self):
+        response = self.client.post('/harvest-query', data=dict(self.form, truck_id='OTHER-GROWER'))
+        self.assertIn(b'Choose a truck from Vehicles.', response.data)
+        self.conn.commit.assert_not_called()
+
+    def test_existing_truck_can_be_kept_after_vehicle_removed(self):
+        response = self.client.post('/harvest-query', data=dict(self.form, truck_id='496A'))
+        self.assertEqual(response.status_code, 302)
         self.conn.commit.assert_called_once()
 
     def test_invalid_season_year_returns_400_before_database(self):

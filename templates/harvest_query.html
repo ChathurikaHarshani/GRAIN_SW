@@ -173,10 +173,16 @@
 
     <div class="col-md-2">
       <label class="form-label" for="entry-truck">Truck</label>
-      <input class="form-control" id="entry-truck" name="truck_id" list="entry-trucks" maxlength="100" value="{{ (edit_load.Truck_ID or '') if edit_load else (entry_defaults.truck_id or '') }}">
-      <datalist id="entry-trucks">
-        {% for truck in trucks %}<option value="{{ truck.Truck_ID }}"></option>{% endfor %}
-      </datalist>
+      {% set selected_truck = (edit_load.Truck_ID or '') if edit_load else (entry_defaults.truck_id or '') %}
+      <select class="form-select" id="entry-truck" name="truck_id">
+        <option value="">Unassigned</option>
+        {% if edit_load and selected_truck and selected_truck not in entry_trucks|map(attribute='Vehicle_Code')|list %}
+          <option value="{{ selected_truck }}" selected>{{ selected_truck }} (existing truck)</option>
+        {% endif %}
+        {% for truck in entry_trucks %}
+          <option value="{{ truck.Vehicle_Code }}" {% if selected_truck == truck.Vehicle_Code %}selected{% endif %}>{{ truck.Vehicle_Code }}{% if truck.Vehicle_Name and truck.Vehicle_Name|trim|lower != truck.Vehicle_Code|trim|lower %} - {{ truck.Vehicle_Name }}{% endif %}</option>
+        {% endfor %}
+      </select>
     </div>
 
     <div class="col-md-2">

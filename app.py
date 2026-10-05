@@ -1796,6 +1796,9 @@ def harvest_query():
         WHERE d.Grower_ID=%s AND h.Truck_ID IS NOT NULL AND TRIM(h.Truck_ID) <> ''
         ORDER BY h.Truck_ID""", (current_user.grower_id,))
     trucks = cur.fetchall()
+    cur.execute("SELECT Vehicle_Code, Vehicle_Name FROM Vehicles WHERE Grower_ID=%s ORDER BY Vehicle_Code",
+                (current_user.grower_id,))
+    entry_trucks = cur.fetchall()
 
     error = None
     edit_load = None
@@ -1854,6 +1857,9 @@ def harvest_query():
 
         if len(truck_id) > 100:
             error = "Truck must be 100 characters or fewer."
+        elif truck_id and truck_id not in {v["Vehicle_Code"] for v in entry_trucks} and not (
+                edit_load and truck_id == edit_load.get("Truck_ID")):
+            error = "Choose a truck from Vehicles."
 
         duplicate_load = False
         if not error and load_num and harvest_date and field_id and cart_id:
@@ -2100,6 +2106,7 @@ def harvest_query():
         crops=crops,
         carts=carts,
         trucks=trucks,
+        entry_trucks=entry_trucks,
         extra_filters=extra_filters,
         loads=loads,
         selected_field=selected_field,
@@ -2962,6 +2969,118 @@ def delivery():
 
     context = build_reconcile_context(start_date, end_date, crop_id)
     return render_template("delivery.html", **context)
+
+
+@app.route("/delivery/new", methods=["GET", "POST"])
+@login_required
+@editor_required
+def new_delivery():
+    if request.method == "POST":
+        check_access_csrf()
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    form = request.form if request.method == "POST" else {"delivery_date": date.today().isoformat()}
+    error = None
+    try:
+        cur.execute("SELECT Crop_ID, Crop_Name, Weight_PerBushel, Base_MC FROM Crop ORDER BY Crop_Name")
+        crops = cur.fetchall()
+        cur.execute("SELECT DelLoc_ID, DelLoc_code, Location FROM Delivery_Location WHERE Grower_ID=%s ORDER BY DelLoc_code",
+                    (current_user.grower_id,))
+        destinations = cur.fetchall()
+        cur.execute("SELECT StorLoc_ID, Bin_Code, Bin_Name FROM Storage_Location WHERE Grower_ID=%s ORDER BY Bin_Code",
+                    (current_user.grower_id,))
+        storages = cur.fetchall()
+        if request.method == "POST":
+            try:
+                ticket = form.get("ticket_num", "").strip()
+                if not re.fullmatch(r"[0-9]{1,10}", ticket) or not 1 <= int(ticket) <= 2147483647:
+                    raise ValueError("Enter a positive whole-number ticket number (up to 2147483647).")
+                try:
+                    delivery_date = date.fromisoformat(form.get("delivery_date", ""))
+                except ValueError:
+                    raise ValueError("Enter a valid delivery date.")
+                year = form.get("crop_year", "").strip()
+                if not re.fullmatch(r"[0-9]{4}", year) or not 1900 <= int(year) <= delivery_date.year:
+                    raise ValueError("Enter the original harvest year, between 1900 and the delivery year.")
+                crop = next((c for c in crops if str(c["Crop_ID"]) == form.get("crop_id")), None)
+                if not crop:
+                    raise ValueError("Choose a valid crop.")
+                destination = next((d for d in destinations if str(d["DelLoc_ID"]) == form.get("delloc_id")), None)
+                if not destination:
+                    raise ValueError("Choose a delivery location for your grower.")
+                storage = next((s for s in storages if str(s["StorLoc_ID"]) == form.get("storloc_id")), None)
+                if not storage:
+                    raise ValueError("Choose a source storage location for your grower.")
+
+                def number(key, label, maximum=9999999999.99):
+                    raw = form.get(key, "").strip()
+                    if not raw:
+                        return None
+                    try:
+                        value = float(raw)
+                    except ValueError:
+                        raise ValueError(f"Enter a valid {label}.")
+                    if not math.isfinite(value) or not 0 <= value <= maximum:
+                        raise ValueError(f"{label} must be between 0 and {maximum:g}.")
+                    return value
+
+                mc = number("mc", "Moisture", 99.99)
+                gross = number("gross", "Gross weight")
+                tare = number("tare", "Tare weight")
+                bushels = number("bushels", "Bushels")
+                if gross is not None:
+                    if bushels is not None:
+                        raise ValueError("Enter weights or bushels, not both. Clear Bushels to calculate it from weights.")
+                    if tare is None or tare >= gross:
+                        raise ValueError("Enter a tare weight less than gross weight (use 0 for a net weight).")
+                    wpb = float(crop["Weight_PerBushel"] or 0)
+                    base_mc = float(crop["Base_MC"]) if crop["Base_MC"] is not None else None
+                    if wpb <= 0 or (base_mc is not None and not 0 <= base_mc < 100):
+                        raise ValueError("This crop needs valid bushel weight and moisture settings before entering weights.")
+                    bushels = calculate_bushels(gross, tare, mc, wpb, base_mc)
+                elif tare is not None:
+                    raise ValueError("Enter gross weight with tare weight, or clear both to enter bushels.")
+                if bushels is None or not 0 < bushels <= 9999999999.99:
+                    raise ValueError("Enter positive bushels or weights that produce positive bushels.")
+                price = number("price", "Price", 999999.9999)
+                gross_sale = number("gross_sale", "Gross sale")
+                discounts = number("discounts", "Sale discounts")
+                if gross_sale is None and price is not None:
+                    gross_sale = Decimal(str(bushels)) * Decimal(str(price))
+                    gross_sale = gross_sale.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    if gross_sale > Decimal("9999999999.99"):
+                        raise ValueError("Calculated gross sale is too large.")
+                if discounts and (gross_sale is None or discounts > gross_sale):
+                    raise ValueError("Sale discounts require a gross sale and cannot exceed it.")
+                comments = form.get("comments", "").strip()
+                if len(comments) > 255:
+                    raise ValueError("Comments must be 255 characters or fewer.")
+                cur.execute("""SELECT Delivery_ID FROM Delivery
+                    WHERE Grower_ID=%s AND Ticket_Num=%s AND Delivery_Date=%s AND DelLoc_ID=%s LIMIT 1""",
+                    (current_user.grower_id, int(ticket), delivery_date, destination["DelLoc_ID"]))
+                if cur.fetchone():
+                    raise ValueError("This ticket, date, and delivery location already exist. Review the existing delivery.")
+                cur.execute("""INSERT INTO Delivery
+                    (Grower_ID, Ticket_Num, Delivery_Date, Crop_Year, Crop_ID, DelLoc_ID, StorLoc_ID,
+                     MC, Gross_Weight, Tare_Weight, Bushels, Price, Gross_Sale, Sale_Discounts, Comments)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (current_user.grower_id, int(ticket), delivery_date, int(year), crop["Crop_ID"],
+                     destination["DelLoc_ID"], storage["StorLoc_ID"], mc, gross, tare, bushels,
+                     price, gross_sale, discounts, comments or None))
+                conn.commit()
+                flash(f"Delivery ticket {ticket} saved successfully.", "success")
+                return redirect(url_for("delivery", start=delivery_date.isoformat(),
+                                        end=delivery_date.isoformat(), crop_id=crop["Crop_ID"]))
+            except ValueError as exc:
+                error = str(exc)
+        return render_template("delivery_form.html", form=form, error=error, crops=crops,
+                               destinations=destinations, storages=storages)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
 
 
 def count_unassigned_deliveries():
