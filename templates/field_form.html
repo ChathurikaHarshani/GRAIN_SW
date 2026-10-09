@@ -39,8 +39,9 @@
         <input type="number" min="0.01" step="0.01" class="form-control" name="silage_acres" id="silage-acres" disabled>
       </div>
       <div class="mb-3">
-        <label class="form-label" for="silage-bu-per-acre">Silage Bu/ac</label>
+        <label class="form-label" for="silage-bu-per-acre">Silage Bu/ac (optional)</label>
         <input type="number" min="0.01" step="0.01" class="form-control" name="silage_bu_per_acre" id="silage-bu-per-acre" disabled>
+        <div class="form-text">Leave blank to use the grain field's yield. Adjust the grain field's acres to the acres harvested for grain.</div>
       </div>
     </div>
     {% endif %}
@@ -76,8 +77,9 @@
       </div>
       {% if field and 'silage' in field.Field_Name|lower %}
       <div class="col-md-4 mb-3">
-        <label class="form-label">Silage Bu/ac</label>
-        <input type="number" min="0.01" step="0.01" class="form-control" name="silage_bu_per_acre" value="{{ field.Silage_Bu_Per_Acre if field.Silage_Bu_Per_Acre is not none else '' }}" required>
+        <label class="form-label">Silage Bu/ac (optional)</label>
+        <input type="number" min="0.01" step="0.01" class="form-control" name="silage_bu_per_acre" value="{{ field.Silage_Bu_Per_Acre if field.Silage_Bu_Per_Acre is not none else '' }}">
+        <div class="form-text">Leave blank to use the corresponding grain field's yield for this crop year. Adjust that grain field's acres to the acres harvested for grain. Enter a value here to override the automatic yield.</div>
       </div>
       {% endif %}
     </div>
@@ -123,7 +125,6 @@
     silageYear.required = enabled;
     silageAcres.required = enabled;
     silageAcres.disabled = !enabled;
-    silageYield.required = enabled;
     silageYield.disabled = !enabled;
     baseFieldSelect.required = enabled;
     if (!enabled) {

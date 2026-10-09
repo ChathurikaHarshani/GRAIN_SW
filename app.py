@@ -844,19 +844,35 @@ def edit_department(dpt_id):
 @app.route("/fields")
 @admin_required
 def list_fields():
+    selected_year = request.args.get("crop_year", "").strip()
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
     cur.execute("""
-        SELECT f.Field_ID, f.Field_Name, f.Acres, f.Silage_Bu_Per_Acre, f.Crop_Year, f.Irr_Type, f.Hybrid_Variety, f.Note,
+        SELECT DISTINCT f.Crop_Year
+        FROM Field f
+        JOIN Department d ON f.Dpt_ID = d.Dpt_ID
+        WHERE d.Grower_ID=%s AND f.Crop_Year IS NOT NULL
+        ORDER BY f.Crop_Year DESC
+    """, (current_user.grower_id,))
+    crop_years = [row["Crop_Year"] for row in cur.fetchall()]
+    params = [current_user.grower_id]
+    year_filter = ""
+    if selected_year:
+        year_filter = " AND f.Crop_Year=%s"
+        params.append(selected_year)
+    cur.execute("""
+        SELECT f.Field_ID, f.Dpt_ID, f.Field_Name, f.Acres, f.Silage_Bu_Per_Acre, f.Crop_Year, f.Irr_Type, f.Hybrid_Variety, f.Note,
                d.Dpt_Name
         FROM Field f
         JOIN Department d ON f.Dpt_ID = d.Dpt_ID
-        WHERE d.Grower_ID=%s ORDER BY f.Field_Name;
-    """, (current_user.grower_id,))
+        WHERE d.Grower_ID=%s
+    """ + year_filter + " ORDER BY f.Field_Name", tuple(params))
     fields = cur.fetchall()
+    populate_silage_yields(cur, fields, current_user.grower_id)
     cur.close()
     conn.close()
-    return render_template("fields.html", fields=fields)
+    return render_template("fields.html", fields=fields, crop_years=crop_years,
+                           selected_year=selected_year)
 
 @app.route("/fields/new", methods=["GET", "POST"])
 @admin_required
@@ -917,7 +933,7 @@ def new_field():
             hybrid = base_field.get("Hybrid_Variety") or ""
             dpt_id = str(base_field["Dpt_ID"])
 
-        if field_name and crop_year and dpt_id and (not base_field_id or (acres and silage_bu_per_acre)):
+        if field_name and crop_year and dpt_id and (not base_field_id or acres):
             check = conn.cursor()
             check.execute("SELECT 1 FROM Department WHERE Dpt_ID=%s AND Grower_ID=%s", (dpt_id, current_user.grower_id))
             allowed_department = check.fetchone()
@@ -960,7 +976,7 @@ def new_field():
             return redirect(url_for("list_fields"))
 
         conn.close()
-        error = "Silage acres and Silage Bu/ac are required." if base_field_id else "Field Name, Crop Year, and Department are required."
+        error = "Silage acres are required." if base_field_id else "Field Name, Crop Year, and Department are required."
         return render_template("field_form.html", departments=departments, base_fields=base_fields, base_field_years=base_field_years, error=error)
 
     conn.close()
@@ -2958,6 +2974,43 @@ def _silage_base_field_name(value):
         return name
     return name[:marker_index].rstrip(" -_/").strip()
 
+
+def populate_silage_yields(cur, fields, grower_id):
+    """Resolve blank silage yields using same-department, same-year grain harvests."""
+    silage_fields = [f for f in fields if "silage" in f["Field_Name"].lower()]
+    if not silage_fields:
+        return
+    bushels_sql = calculated_bushels_sql("h", "c")
+    cur.execute("""
+        SELECT f.Field_Name, f.Dpt_ID, f.Crop_Year,
+               SUM(""" + bushels_sql + """) / NULLIF(f.Acres, 0) AS Grain_Yield
+        FROM Field f
+        JOIN Department d ON d.Dpt_ID=f.Dpt_ID
+        JOIN Harvest h ON h.Field_ID=f.Field_ID
+        JOIN Crop c ON c.Crop_ID=h.Crop_ID
+        WHERE d.Grower_ID=%s AND f.Acres>0
+          AND LOWER(f.Field_Name) NOT LIKE %s
+          AND (UPPER(TRIM(c.Crop_Code)) IN ('C', 'HMC')
+               OR LOWER(TRIM(c.Crop_Name)) IN ('corn', 'hmc', 'high moisture corn'))
+        GROUP BY f.Field_ID, f.Field_Name, f.Dpt_ID, f.Crop_Year, f.Acres
+    """, (grower_id, "%silage%"))
+    grain_yields = {}
+    for row in cur.fetchall():
+        key = (row["Dpt_ID"], str(row["Crop_Year"]), row["Field_Name"].strip().casefold())
+        grain_yields.setdefault(key, []).append(row["Grain_Yield"])
+    for field in silage_fields:
+        key = (field["Dpt_ID"], str(field["Crop_Year"]),
+               _silage_base_field_name(field["Field_Name"]).casefold())
+        matches = grain_yields.get(key, [])
+        automatic = matches[0] if len(matches) == 1 else None
+        manual = field.get("Silage_Bu_Per_Acre")
+        field["Effective_Silage_Yield"] = manual if manual is not None else automatic
+        field["Silage_Yield_Source"] = (
+            "Manual" if manual is not None else
+            "From grain harvest" if automatic is not None else
+            "Grain yield unavailable; check grain harvest and harvested acres"
+        )
+
 @app.route("/delivery", methods=["GET"])
 @login_required
 def delivery():
@@ -3258,7 +3311,7 @@ def yield_report():
     results = cur.fetchall()
 
     silage_query = """
-        SELECT fi.Field_Name, fi.Acres, fi.Silage_Bu_Per_Acre, fi.Crop_Year, fi.Irr_Type
+        SELECT fi.Field_Name, fi.Dpt_ID, fi.Acres, fi.Silage_Bu_Per_Acre, fi.Crop_Year, fi.Irr_Type
         FROM Field fi
         JOIN Department d ON fi.Dpt_ID=d.Dpt_ID
         WHERE d.Grower_ID=%s AND LOWER(fi.Field_Name) LIKE %s
@@ -3273,6 +3326,7 @@ def yield_report():
     silage_query += " ORDER BY fi.Crop_Year DESC, fi.Field_Name"
     cur.execute(silage_query, silage_params)
     silage_fields = cur.fetchall()
+    populate_silage_yields(cur, silage_fields, current_user.grower_id)
     cur.close()
     conn.close()
 
@@ -3329,7 +3383,7 @@ def yield_report():
                     continue
                 base_name = _silage_base_field_name(silage_field["Field_Name"])
                 silage_acres = _f(silage_field.get("Acres"))
-                silage_yield = _f(silage_field.get("Silage_Bu_Per_Acre")) if silage_field.get("Silage_Bu_Per_Acre") is not None else None
+                silage_yield = _f(silage_field["Effective_Silage_Yield"]) if silage_field["Effective_Silage_Yield"] is not None else None
                 if silage_acres > 0:
                     silage_rows.append({
                         "field_name": silage_field["Field_Name"],
@@ -3338,7 +3392,7 @@ def yield_report():
                         "yield": silage_yield,
                         "bushels": silage_acres * silage_yield if silage_yield is not None else None,
                         "type": irrigation_group(silage_field.get("Irr_Type")),
-                        "status": None if silage_yield is not None else f"Add Silage Bu/ac to {silage_field['Field_Name']}",
+                        "status": silage_field["Silage_Yield_Source"],
                     })
 
         yield_sections.append({
