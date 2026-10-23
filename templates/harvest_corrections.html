@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% block title %}Harvest Corrections | GMS{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h1>Harvest Corrections</h1>
+  <p>Manual corrections stay in effect during Raven imports, including values intentionally left blank.
+    Use Raven Value removes protection for that attribute and resumes future Raven updates.
+    Field and crop year are selected together.</p>
+  <a href="{{ url_for('harvest_query') }}">Back to Harvest Loads</a>
+  <div class="table-responsive mt-3"><table class="table table-striped">
+    <thead><tr><th>Load / date</th><th>Attribute</th><th>GMS value</th><th>Latest Raven value</th><th>Status</th><th>Action</th></tr></thead>
+    <tbody>{% for row in rows %}<tr>
+      <td><a href="{{ url_for('harvest_query', edit_id=row.harvest_id) }}">{{ row.load }}</a><br>{{ row.date }}</td>
+      <td>{{ row.label }}</td><td>{{ row.manual if row.manual is not none else '(blank)' }}</td>
+      <td>{% if not row.available %}Not yet captured{% else %}{{ row.raven if row.raven is not none else '(blank)' }}{% endif %}</td>
+      <td>{% if row.conflict %}<span class="badge bg-warning text-dark">Conflicting values</span>{% else %}Manual correction{% endif %}</td>
+      <td>{% if current_user.can_edit and row.available %}
+        <form method="post">
+          <input type="hidden" name="csrf_token" value="{{ access_csrf_token() }}">
+          <input type="hidden" name="harvest_id" value="{{ row.harvest_id }}">
+          <input type="hidden" name="attribute" value="{{ row.attribute }}">
+          <button class="btn btn-sm btn-outline-secondary" name="action" value="manual">Keep Manual Value</button>
+          <button class="btn btn-sm btn-outline-primary" name="action" value="raven">Use Raven Value</button>
+        </form>{% endif %}</td>
+    </tr>{% else %}<tr><td colspan="6">No tracked manual corrections.</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <h2 class="h4 mt-4">Recent changes</h2>
+  <div class="table-responsive"><table class="table">
+    <thead><tr><th>When</th><th>User</th><th>Load ID</th><th>Attribute</th><th>Previous</th><th>Saved</th></tr></thead>
+    <tbody>{% for item in history %}<tr>
+      <td>{{ item.Changed_At }}</td><td>{{ item.username or item.User_ID }}</td>
+      <td>{{ item.Harvest_ID }}</td><td>{{ item.Attribute_Name }}</td>
+      <td>{{ item.Previous_Value }}</td><td>{{ item.Corrected_Value }}</td>
+    </tr>{% else %}<tr><td colspan="6">No recorded changes.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endblock %}

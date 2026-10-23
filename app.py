@@ -1,5 +1,6 @@
 from flask import Flask, render_template, jsonify, request, redirect, url_for, session, abort, send_file, flash
 from db import get_conn
+from harvest_corrections import record_edit
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import calendar
@@ -22,6 +23,8 @@ import pandas as pd
 
 app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
+from correction_views import bp as corrections_bp
+app.register_blueprint(corrections_bp)
 from invitations import bp as invitations_bp, ensure_schema as ensure_invitation_schema, csrf_token as access_csrf_token, check_csrf as check_access_csrf, email_ready
 app.register_blueprint(invitations_bp)
 from password_reset import bp as password_reset_bp, ensure_schema as ensure_password_reset_schema, password_version
@@ -1936,6 +1939,26 @@ def harvest_query():
 
                 cur2 = conn.cursor()
                 if harvest_id:
+                    # Serialize edits with imports, and compare with the latest row.
+                    cur2.execute('SELECT h.* FROM Harvest h JOIN Field f ON f.Field_ID=h.Field_ID '
+                                 'JOIN Department d ON d.Dpt_ID=f.Dpt_ID '
+                                 'WHERE h.Harvest_ID=%s AND d.Grower_ID=%s FOR UPDATE',
+                                 (int(harvest_id), current_user.grower_id))
+                    locked_row = cur2.fetchone()
+                    if not locked_row:
+                        abort(404)
+                    before = dict(zip([column[0] for column in cur2.description], locked_row))
+                    if before.get('External_Load_Key'):
+                        if ((int(cart_id) if cart_id else None) != before.get('Cart_ID')
+                                or gross_val != (float(before['Gross_Weight']) if before.get('Gross_Weight') is not None else None)
+                                or tare_val != float(before.get('Tare_Weight') or 0)):
+                            abort(400, description='Imported cart and scale weights must remain as recorded. '
+                                  'Enter a separate offset load to correct a weight.')
+                    record_edit(cur2, int(harvest_id), int(current_user.id), before, {
+                        'Load_Num': load_num, 'Field_ID': int(field_id),
+                        'Harvest_Date': harvest_date, 'Crop_ID': int(crop_id),
+                        'MC': mc_val, 'StorLoc_ID': storloc_val, 'Truck_ID': truck_id or None,
+                    })
                     cur2.execute("""
                         UPDATE Harvest
                         SET Cart_ID = %s,

@@ -74,6 +74,7 @@ import pymysql
 from dotenv import load_dotenv
 
 from slingshot_client import SlingshotClient
+from harvest_corrections import read_state, save_source, merge_source, corrected_bushels
 
 
 load_dotenv()
@@ -574,7 +575,7 @@ def insert_harvest_load(
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT Harvest_ID
+            SELECT *
             FROM Harvest
             WHERE External_Load_Key = %s
                OR (
@@ -588,7 +589,7 @@ def insert_harvest_load(
                 CASE WHEN External_Load_Key = %s THEN 0 ELSE 1 END,
                 CASE WHEN MC IS NOT NULL THEN 0 ELSE 1 END,
                 Harvest_ID
-            LIMIT 1
+            LIMIT 1 FOR UPDATE
             """,
             (
                 external_load_key,
@@ -629,6 +630,26 @@ def insert_harvest_load(
         )
 
         if existing:
+            names = ('Cart_ID', 'Field_ID', 'Crop_ID', 'Dpt_ID', 'StorLoc_ID',
+                     'Load_Num', 'Harvest_Date', 'MC', 'Gross_Weight', 'Tare_Weight',
+                     'Bushels', 'WetBushels', 'DryBushels', 'JobNumber', 'Note',
+                     'Truck_ID', 'Destination', 'Test_Weight', 'Variety', 'Load_Cell',
+                     'Source_File_Name', 'Source_File_ID', 'External_Load_Key')
+            source = dict(zip(names, values))
+            _, overrides = read_state(cur, existing['Harvest_ID'])
+            effective = merge_source(source, existing, overrides)
+            if overrides.intersection({'MC', 'Crop_ID'}):
+                cur.execute('SELECT Weight_PerBushel, Base_MC FROM Crop WHERE Crop_ID=%s',
+                            (effective['Crop_ID'],))
+                crop = cur.fetchone()
+                # Match the existing non-null import policy for recorded weights.
+                weights = dict(effective)
+                for name in ('Gross_Weight', 'Tare_Weight'):
+                    if weights[name] is None:
+                        weights[name] = existing[name]
+                effective['Bushels'] = corrected_bushels(
+                    weights, crop['Weight_PerBushel'], crop['Base_MC'])
+            values = tuple(effective[name] for name in names)
             cur.execute(
                 """
                 UPDATE Harvest
@@ -637,10 +658,10 @@ def insert_harvest_load(
                     Field_ID = %s,
                     Crop_ID = %s,
                     Dpt_ID = %s,
-                    StorLoc_ID = COALESCE(%s, StorLoc_ID),
+                    StorLoc_ID = %s,
                     Load_Num = %s,
                     Harvest_Date = %s,
-                    MC = COALESCE(%s, MC),
+                    MC = %s,
                     Gross_Weight = COALESCE(%s, Gross_Weight),
                     Tare_Weight = COALESCE(%s, Tare_Weight),
                     Bushels = COALESCE(%s, Bushels),
@@ -648,7 +669,7 @@ def insert_harvest_load(
                     DryBushels = COALESCE(%s, DryBushels),
                     JobNumber = %s,
                     Note = COALESCE(%s, Note),
-                    Truck_ID = COALESCE(%s, Truck_ID),
+                    Truck_ID = %s,
                     Destination = COALESCE(%s, Destination),
                     Test_Weight = COALESCE(%s, Test_Weight),
                     Variety = COALESCE(%s, Variety),
@@ -661,6 +682,7 @@ def insert_harvest_load(
                 """,
                 values + (existing["Harvest_ID"],)
             )
+            save_source(cur, existing['Harvest_ID'], source, overrides)
             return "UPDATED"
 
         cur.execute(
@@ -700,6 +722,12 @@ def insert_harvest_load(
             """,
             values
         )
+        names = ('Cart_ID', 'Field_ID', 'Crop_ID', 'Dpt_ID', 'StorLoc_ID',
+                 'Load_Num', 'Harvest_Date', 'MC', 'Gross_Weight', 'Tare_Weight',
+                 'Bushels', 'WetBushels', 'DryBushels', 'JobNumber', 'Note',
+                 'Truck_ID', 'Destination', 'Test_Weight', 'Variety', 'Load_Cell',
+                 'Source_File_Name', 'Source_File_ID', 'External_Load_Key')
+        save_source(cur, cur.lastrowid, dict(zip(names, values)), set())
 
     return "IMPORTED"
 

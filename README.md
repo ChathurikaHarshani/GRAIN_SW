@@ -1,5 +1,58 @@
 # GRAIN_SW
 
+## Local development: Raven corrections
+
+The correction feature requires `migrations/011_harvest_corrections.sql` before
+using harvest editing, imports, or `/harvest/corrections`. Apply it only to a
+separate development database initially. Both the website and `import_grc.py`
+use `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME`; set all of them
+explicitly because the legacy default database ports differ. Install the pinned
+dependencies into the project's virtual environment with
+`.venv/Scripts/python.exe -m pip install -r requirements.txt`.
+
+Existing Harvest columns remain the values used by reports and inventory.
+`Harvest_Raven_State` holds the latest imported snapshot and the attributes
+manually overridden; `Harvest_Correction_History` records before/after values,
+the user, and time. Migration 011 does not guess or backfill historical edits.
+Edits made before the first import after migration are protected, but no Raven
+comparison is available until that import captures its snapshot.
+
+Protected attributes are load number, field/year, date, crop, moisture, storage,
+and truck. Crop year is part of the selected Field record, so changing to a
+different field/year protects the Field_ID and its associated department. This
+does not change the year on a shared Field record. Cart, gross/tare, and Raven
+source metadata continue to import as before. Incorrect recorded weights should
+be handled with a separate offset load. Moisture/crop overrides recalculate
+effective bushels using the effective values and incoming recorded weights.
+
+Harvest Loads has a **Corrections / conflicts** link. The review page shows
+manual values alongside the latest Raven snapshot and recent change history.
+**Keep Manual Value** retains protection; conflicting values remain visible.
+**Use Raven Value** restores the latest Raven value for that attribute and
+resumes Raven updates. Viewers can inspect the page; only editors/admins can
+reset overrides, with session CSRF protection and grower-scoped lookups.
+Missing storage/truck values remain visible through existing Needs Attention.
+
+Local regression checks (no MySQL or Raven connections):
+
+```powershell
+.venv/Scripts/python.exe -m unittest discover -s tests -p test_harvest_corrections.py -v
+.venv/Scripts/python.exe -m unittest discover -s tests -p test_correction_views.py -v
+.venv/Scripts/python.exe -m unittest discover -s tests -p test_harvest_edit.py -v
+```
+
+Before release, validate on a disposable MySQL database: apply migration 011,
+import a saved sample, edit protected attributes (including blank truck/storage),
+reimport twice, and verify the same Harvest_ID, protected values, calculated
+bushels, comparison page, history, and per-attribute reset. Verify viewer and
+cross-grower access and simultaneous import/edit transactions too.
+
+Manual edits leave External_Load_Key unchanged, allowing the same Raven source
+to match after edits to load/date/field/crop. An *upstream* change to Raven's
+identity attributes can still change this composite key and needs reconciliation;
+this feature does not invent a stable Raven load ID. Historical overwritten
+corrections cannot be recovered automatically.
+
 ## UNL user invitations
 
 Administrators can invite `@unl.edu` addresses from **Farm Setup → User Access**,
