@@ -15,6 +15,9 @@
       <label class="form-label" for="crop-year">Crop Year</label>
       <select class="form-select" id="crop-year" name="crop_year">
         <option value="">All Years</option>
+        {% if selected_year and selected_year not in crop_years|map('string')|list %}
+        <option value="{{ selected_year }}" selected>{{ selected_year }}</option>
+        {% endif %}
         {% for year in crop_years %}
         <option value="{{ year }}" {% if selected_year == year|string %}selected{% endif %}>{{ year }}</option>
         {% endfor %}
@@ -22,7 +25,7 @@
     </div>
     <div class="col-auto d-flex align-items-end gap-2">
       <button class="btn btn-primary" type="submit">Apply</button>
-      {% if selected_year %}<a class="btn btn-outline-secondary" href="{{ url_for('list_fields') }}">Clear</a>{% endif %}
+      {% if selected_year %}<a class="btn btn-outline-secondary" href="{{ url_for('list_fields', crop_year='') }}">All Years</a>{% endif %}
     </div>
   </form>
 

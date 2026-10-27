@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Monthly Corn Pricing | GMS{% endblock %}
+{% macro money(value) %}{{ '$%.2f'|format(value) if value is not none else '—' }}{% endmacro %}
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1>Monthly Corn Pricing</h1>
+    {% include "_print_report_button.html" %}
+  </div>
+  <form method="get" class="d-flex gap-2 align-items-end mb-4 no-print">
+    <div><label for="year" class="form-label">Crop year (October start)</label>
+    <input id="year" name="year" type="number" min="1900" max="2099" value="{{ year }}" class="form-control" required></div>
+    <button class="btn btn-primary">View report</button>
+    <a class="btn btn-outline-primary" href="{{ url_for('corn_pricing_report', year=year, format='csv') }}">Download CSV</a>
+  </form>
+  <h2>{{ year }} Crop Year · October {{ year }}–September {{ year + 1 }}</h2>
+  <p>{{ current_user.grower_name }} · As of {{ as_of }} · All prices in $/bu</p>
+  <p>Corn = average of the first five recorded market days + $0.04. HMC = corn price × 95%.
+     Average includes {{ complete_count }} of 12 complete months.</p>
+  <div class="table-responsive">
+    <table class="table table-bordered table-sm">
+      <thead><tr><th scope="col">Month</th><th scope="col">Corn</th><th scope="col">HMC</th>
+      {% for i in range(1,6) %}<th scope="col">Day {{ i }}</th>{% endfor %}<th scope="col">Status</th></tr></thead>
+      <tbody>{% for row in rows %}<tr>
+        <th scope="row">{{ row.month }} {{ row.year }}</th><td>{{ money(row.corn) }}</td><td>{{ money(row.hmc) }}</td>
+        {% for value in row.days %}<td>{{ money(value) }}</td>{% endfor %}<td>{{ row.status }}</td>
+      </tr>{% endfor %}</tbody>
+      <tfoot><tr><th scope="row">Average (complete months)</th><td>{{ money(averages.corn) }}</td><td>{{ money(averages.hmc) }}</td><td colspan="6">{{ complete_count }}/12 months</td></tr></tfoot>
+    </table>
+  </div>
+  <p class="small">Days are ordered by the numeric day of month entered in Market Prices. Enter one cash quote per market date.
+  Months with fewer than five dates, duplicate dates, or invalid entries have no final price and are excluded from the average.
+  Confirm the first five market dates have been entered before sharing.</p>
+</div>
+{% endblock %}

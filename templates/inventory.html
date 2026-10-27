@@ -24,6 +24,9 @@
     <label class="form-label ">Crop Year</label>
     <select class="form-select" name="crop_year">
       <option value="">All Years</option>
+      {% if active_filters.crop_year and active_filters.crop_year|string not in crop_years|map('string')|list %}
+      <option value="{{ active_filters.crop_year }}" selected>{{ active_filters.crop_year }}</option>
+      {% endif %}
       {% for year in crop_years %}<option value="{{ year }}" {% if active_filters.crop_year|string == year|string %}selected{% endif %}>{{ year }}</option>{% endfor %}
     </select>
   </div>

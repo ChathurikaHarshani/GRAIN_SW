@@ -1,6 +1,7 @@
 from flask import Flask, render_template, jsonify, request, redirect, url_for, session, abort, send_file, flash
 from db import get_conn
 from harvest_corrections import record_edit
+from harvest_attention import bp as harvest_attention_bp, ATTENTION_SQL
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import calendar
@@ -13,6 +14,10 @@ import bcrypt
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from mysql.connector import IntegrityError
 from io import BytesIO
+from corn_pricing import build_report
+from grain_reconciliation import settlement
+import csv
+from io import StringIO
 import pandas as pd
 #from slingshot_client import main as run_slingshot_import
 
@@ -22,7 +27,15 @@ import pandas as pd
 
 
 app = Flask(__name__)
+app.register_blueprint(harvest_attention_bp)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
+
+
+def crop_year_filter():
+    """Default omitted filters to this harvest year; blank explicitly means all."""
+    return request.args.get('crop_year', str(date.today().year)).strip()
+
+
 from correction_views import bp as corrections_bp
 app.register_blueprint(corrections_bp)
 from invitations import bp as invitations_bp, ensure_schema as ensure_invitation_schema, csrf_token as access_csrf_token, check_csrf as check_access_csrf, email_ready
@@ -613,20 +626,31 @@ def dashboard():
         WHERE Grower_ID=%s AND status='pending'""", (current_user.grower_id,))
     pending_users = int((cur.fetchone() or {}).get("n") or 0)
 
-    cur.execute("""
+    cur.execute(f"""
         SELECT COUNT(*) AS n FROM Harvest h
         JOIN Field f ON f.Field_ID=h.Field_ID JOIN Department d ON d.Dpt_ID=f.Dpt_ID
         WHERE d.Grower_ID=%s AND f.Crop_Year=%s
-          AND (h.Gross_Weight IS NULL OR h.MC IS NULL OR h.StorLoc_ID IS NULL)
+          AND {ATTENTION_SQL}
     """, (current_user.grower_id, dashboard_year))
     incomplete_loads = int((cur.fetchone() or {}).get("n") or 0)
 
     cur.close()
     conn.close()
 
-    _, inventory_summary, _ = build_inventory_snapshot(crop_year=str(dashboard_year))
+    inventory_rows, inventory_summary, _ = build_inventory_snapshot(crop_year=str(dashboard_year))
     for crop in ("Corn", "Soybeans", "High Moisture Corn"):
         inventory_summary.setdefault(crop, {"Harvest": 0.0, "Delivered": 0.0, "Inventory": 0.0})
+    inventory_bins = {}
+    for row in inventory_rows:
+        code, name = row.get('Bin_Code'), row.get('Bin_Name')
+        label = f'{code} · {name}' if code and name and code != name else (code or name or 'Unassigned storage')
+        values = inventory_bins.setdefault(label, {})
+        crop = row['Crop_Name']
+        values[crop] = values.get(crop, 0.0) + row['Current_Bu']
+    inventory_datasets = [
+        {'label': label, 'data': [round(values.get(crop, 0.0), 2) for crop in inventory_summary]}
+        for label, values in inventory_bins.items() if any(value != 0 for value in values.values())
+    ]
     month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     monthly_bushels = [0.0] * 12
     for row in monthly_rows:
@@ -652,6 +676,7 @@ def dashboard():
         "monthly_delivery_bushels": monthly_bushels,
         "inventory_labels": list(inventory_summary),
         "inventory_bushels": [round(item["Inventory"], 1) for item in inventory_summary.values()],
+        "inventory_datasets": inventory_datasets,
     }
 
     return render_template("index.html", app_name="GMS", dashboard_data=dashboard_data)
@@ -847,7 +872,7 @@ def edit_department(dpt_id):
 @app.route("/fields")
 @admin_required
 def list_fields():
-    selected_year = request.args.get("crop_year", "").strip()
+    selected_year = crop_year_filter()
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
     cur.execute("""
@@ -1746,7 +1771,7 @@ def harvest_query():
     selected_field_id = request.args.get("field_id", "").strip()
     selected_field = request.args.get("field_name", "").strip()
     selected_storage = request.args.get("storloc_id", "").strip()
-    selected_year = request.args.get("crop_year", "").strip()
+    selected_year = crop_year_filter()
     selected_edit_id = request.args.get("edit_id", "").strip()
     if request.method == "POST":
         selected_edit_id = request.form.get("harvest_id", "").strip()
@@ -2038,7 +2063,7 @@ def harvest_query():
         params.append(selected_year)
 
     if needs_attention:
-        where.append("(h.Gross_Weight IS NULL OR h.MC IS NULL OR h.StorLoc_ID IS NULL)")
+        where.append(ATTENTION_SQL)
 
     append_harvest_filters(where, params, extra_filters)
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
@@ -2062,12 +2087,16 @@ def harvest_query():
           h.Load_Cell,
           h.Cart_ID,
           h.Bushels,
-          h.Note
+          h.Note,
+          (h.Gross_Weight IS NULL OR h.MC IS NULL OR h.StorLoc_ID IS NULL) AS Missing_Data,
+          COALESCE(a.Dismissed, 0) AS Attention_Dismissed,
+          a.Reason AS Attention_Reason
         FROM Harvest h
         JOIN Field f ON h.Field_ID = f.Field_ID
         JOIN Department d ON d.Dpt_ID=f.Dpt_ID
         JOIN Crop cr ON h.Crop_ID = cr.Crop_ID
         LEFT JOIN Storage_Location s ON h.StorLoc_ID = s.StorLoc_ID
+        LEFT JOIN Harvest_Attention a ON a.Harvest_ID=h.Harvest_ID AND a.Grower_ID=d.Grower_ID
         {where_sql}
         ORDER BY h.Harvest_Date DESC, h.Load_Num DESC;
     """, tuple(params))
@@ -2177,7 +2206,7 @@ def harvest_summary():
     selected_field_id = request.args.get("field_id", "").strip()
     selected_field = request.args.get("field_name", "").strip()
     selected_storage = request.args.get("storloc_id", "").strip()
-    selected_year = request.args.get("crop_year", "").strip()
+    selected_year = crop_year_filter()
 
     where = ["d.Grower_ID = %s"]
     params = [current_user.grower_id]
@@ -2198,7 +2227,7 @@ def harvest_summary():
         params.append(selected_year)
 
     if request.args.get("needs_attention", "") == "1":
-        where.append("(h.Gross_Weight IS NULL OR h.MC IS NULL OR h.StorLoc_ID IS NULL)")
+        where.append(ATTENTION_SQL)
     append_harvest_filters(where, params, extra_filters)
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
@@ -2796,6 +2825,47 @@ def invoice_unit_price(monthly_average, is_hmc=False):
     return price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+@app.route("/reports/corn-pricing")
+@membership_required
+def corn_pricing_report():
+    today = date.today()
+    default_year = today.year
+    try:
+        year = int(request.args.get('year', default_year))
+        if not 1900 <= year <= 2099:
+            raise ValueError
+    except ValueError:
+        abort(400, description='Crop year must be between 1900 and 2099.')
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("""
+            SELECT mp.Year, mp.Month, mp.Day, mp.Market_Price
+            FROM MarketPriceMonthly mp JOIN Crop c ON c.Crop_ID=mp.Crop
+            WHERE mp.Grower_ID=%s
+              AND (mp.Year * 100 + mp.Month) BETWEEN %s AND %s
+              AND (UPPER(TRIM(c.Crop_Code))='C' OR LOWER(TRIM(c.Crop_Name))='corn')
+            ORDER BY mp.Year, mp.Month, mp.ID
+        """, (current_user.grower_id, year * 100 + 10, (year + 1) * 100 + 9))
+        rows, averages, count = build_report(cur.fetchall(), year)
+    finally:
+        cur.close()
+        conn.close()
+    if request.args.get('format') == 'csv':
+        output = StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['Crop year', year, 'Corn: cash average + $0.04; HMC: corn x 95%'])
+        writer.writerow(['Month', 'Calendar year', 'Corn ($/bu)', 'HMC ($/bu)',
+                         'Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5', 'Status'])
+        for row in rows:
+            writer.writerow([row['month'], row['year'], row['corn'], row['hmc'], *row['days'], row['status']])
+        writer.writerow(['Average (complete months)', '', averages['corn'], averages['hmc'], f'{count}/12 months'])
+        return app.response_class(output.getvalue(), mimetype='text/csv', headers={
+            'Content-Disposition': f'attachment; filename=corn-pricing-{year}.csv'})
+    return render_template('corn_pricing.html', year=year, rows=rows,
+                           averages=averages, complete_count=count, as_of=today)
+
+
 @app.route("/billing", methods=["GET"])
 @admin_required
 def billing():
@@ -2968,6 +3038,35 @@ def reconcile():
         start, end, date.today() - timedelta(days=30), date.today())
 
     context = build_reconcile_context(start_date, end_date, crop_id)
+    today = date.today()
+    try:
+        year = int(request.args.get('settlement_year', today.year))
+        if not 1900 <= year <= 2099:
+            raise ValueError
+    except ValueError:
+        abort(400, description='Crop year must be between 1900 and 2099.')
+    conn = get_conn()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("""SELECT mp.Year, mp.Month, mp.Day, mp.Market_Price, c.Crop_Code, c.Crop_Name
+            FROM MarketPriceMonthly mp JOIN Crop c ON c.Crop_ID=mp.Crop
+            WHERE mp.Grower_ID=%s AND (mp.Year*100+mp.Month) BETWEEN %s AND %s""",
+                    (current_user.grower_id, year*100+10, (year+1)*100+9))
+        quotes = cur.fetchall()
+        cur.execute("""SELECT d.DelLoc_ID, COALESCE(NULLIF(dl.Location,''), dl.DelLoc_code) AS department,
+            c.Crop_Code, c.Crop_Name, """ + calculated_bushels_sql('d', 'c') + """ AS bushels,
+            d.Gross_Sale - COALESCE(d.Sale_Discounts,0) AS billed
+            FROM Delivery d JOIN Crop c ON c.Crop_ID=d.Crop_ID
+            LEFT JOIN Delivery_Location dl ON dl.DelLoc_ID=d.DelLoc_ID AND dl.Grower_ID=d.Grower_ID
+            WHERE d.Grower_ID=%s AND d.Crop_Year=%s AND d.Delivery_Date<=%s""",
+                    (current_user.grower_id, year, end_date))
+        context['settlement'] = settlement(cur.fetchall(), quotes, year)
+        cur.execute('SELECT COUNT(*) AS count FROM Delivery WHERE Grower_ID=%s AND Crop_Year IS NULL AND Delivery_Date<=%s',
+                    (current_user.grower_id, end_date))
+        context['settlement_unassigned'] = cur.fetchone()['count']
+    finally:
+        cur.close()
+        conn.close()
     return render_template("reconcile.html", **context)
 
 
@@ -3210,7 +3309,7 @@ def delivery_crop_years():
 @login_required
 def yield_report():
     # Filters
-    crop_year   = request.args.get("crop_year", "").strip()   # Field.Crop_Year
+    crop_year   = crop_year_filter()   # Field.Crop_Year
     grower      = request.args.get("grower", "").strip()
     department  = request.args.get("department", "").strip()
     field       = request.args.get("field", "").strip()
@@ -3460,7 +3559,7 @@ def yield_report():
 @app.route("/yield/export", methods=["GET"])
 @login_required
 def yield_export():
-    crop_year   = request.args.get("crop_year", "").strip()
+    crop_year   = crop_year_filter()
     grower      = request.args.get("grower", "").strip()
     department  = request.args.get("department", "").strip()
     field       = request.args.get("field", "").strip()
@@ -3553,7 +3652,7 @@ def yield_export():
 @login_required
 def inventory_report():
     # Filters (optional)
-    crop_year = request.args.get("crop_year", "").strip()   # from Field.Crop_Year
+    crop_year = crop_year_filter()   # from Field.Crop_Year
     crop_name = request.args.get("crop", "").strip()        # Crop.Crop_Name (contains search)
     inventory_rows, summary, corn_split = build_inventory_snapshot(
         crop_year=crop_year,
@@ -3599,7 +3698,7 @@ def inventory_report():
 @login_required
 def inventory_export():
     # same filters
-    crop_year = request.args.get("crop_year", "").strip()
+    crop_year = crop_year_filter()
     crop_name = request.args.get("crop", "").strip()
     rows, _, _ = build_inventory_snapshot(crop_year=crop_year, crop_name=crop_name)
     df = pd.DataFrame([

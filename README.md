@@ -1,5 +1,70 @@
 # GRAIN_SW
 
+## Unusual yield highlighting
+
+On Yield, enable **Highlight unusual yields** to compare displayed field yields
+within each crop/year by irrigation type, or by hybrid/variety plus irrigation
+type. The reference is sum of bushels divided by sum of acres, including the
+field being compared. At least two usable fields are required per group.
+Zero-acre fields and missing/unknown irrigation types are excluded; hybrid mode
+also excludes missing hybrids. Defaults are 15% difference (amber) and 30%
+(red), adjustable on the page. High/Low labels show the direction. Highlighting
+starts off, applies to printing, and does not change database values or Excel
+exports. No migration is needed. Run `node tests/test_yield_highlights.js`.
+
+## Dismiss intentional Harvest Needs Attention warnings
+
+Apply `migrations/012_harvest_attention.sql` before deploying the updated app,
+including the new `harvest_attention.py` module. The migration creates a separate
+state table and does not alter harvest data. No importer changes are needed.
+
+On Harvest Loads, editors/admins can expand **Dismiss warning**, optionally enter
+a reason, and dismiss an individual missing-weight/moisture/storage warning.
+Viewers can see the state but cannot change it. Dismissed loads are excluded from
+Needs Attention, its filtered summary, and the home-page count; normal reports
+and calculations still include the loads. Uncheck Needs attention to find a
+dismissed load and select **Restore warning**. The dismissal persists until
+restored, including across Raven imports or subsequent load edits. The table
+records the latest actor, reason, and update time (not a full event history).
+POST actions use CSRF protection and verify grower ownership transactionally.
+
+Run isolated checks with `python -m unittest discover -s tests -p test_harvest_attention.py -v`.
+
+## Grain price reconciliation by delivery department
+
+The Reconcile page includes corn (including HMC), milo, and combined due totals
+by delivery destination. Select **Pricing crop year** and **End**: the summary
+includes that original harvest year's deliveries through the end date. Its scope
+is independent of the start date/crop filters used by the load comparisons.
+Due is bushels times the average of complete monthly prices, minus recorded
+gross sale less discounts. Monthly prices use the first five recorded market
+dates plus $0.04; HMC uses 95% of the corn average. Missing prices or gross sale
+make affected due totals unavailable. Incomplete years are marked provisional;
+deliveries without an assigned crop year are counted in a warning and excluded.
+This is a calculated settlement, not a payment ledger. Verify these pricing and
+billed-amount conventions before using it for final settlement. No migration is
+required. Test with `python -m unittest discover -s tests -p test_grain_reconciliation.py -v`.
+
+## Monthly corn pricing report
+
+Open **Reports → Monthly Corn Pricing** and select the crop year (October of
+that year through September of the next). Viewers, editors, and admins can view,
+download CSV, or use Print / Save PDF to prepare the report for sharing.
+The report reads the current grower's corn cash quotes in Market Prices; no
+schema migration is required. Enter a numeric calendar day and one quote per
+market date, including the first five market days. The earliest five recorded
+dates determine each month's cash average. Corn adds $0.04; HMC applies 95%
+before rounding to cents, matching billing's pricing formula.
+
+Months with fewer than five dates or duplicate/invalid entries have no final
+price and are excluded from the displayed average of complete monthly prices.
+Confirm the first five market dates are present before distributing. No email
+is sent automatically. Billing retains its existing averaging of all entered
+monthly quotes; for consistent billing/report results, enter only the intended
+five quotes per month. No production deployment or database changes are needed
+for local verification: `.venv/Scripts/python.exe -m unittest discover -s tests
+-p test_corn_pricing.py -v`.
+
 ## Local development: Raven corrections
 
 The correction feature requires `migrations/011_harvest_corrections.sql` before

@@ -249,6 +249,44 @@ body {
 }
 
 /* Yield summary layout */
+.yield-field-table tr.yield-unusual-moderate > td,
+.yield-legend-moderate {
+  background-color: #fff0bd !important;
+  color: #664d03 !important;
+  box-shadow: none !important;
+}
+.yield-field-table tr.yield-unusual-extreme > td,
+.yield-legend-extreme {
+  background-color: #f8d7da !important;
+  color: #842029 !important;
+  box-shadow: none !important;
+}
+.yield-field-table tr[class*="yield-unusual-"] > td {
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+.report-floating-header {
+  position: fixed;
+  overflow: hidden;
+  z-index: 1900;
+  pointer-events: none;
+  background: #f8f9fa;
+  box-shadow: 0 2px 3px rgba(0, 0, 0, .15);
+}
+.report-floating-header table { margin: 0 !important; table-layout: fixed; }
+.report-floating-header th,
+.report-floating-header td {
+  position: static !important;
+  background: #f8f9fa;
+  color: #212529;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+@media print {
+  .report-floating-header { display: none !important; }
+  .table-responsive thead th { position: static !important; }
+}
+
 .yield-summary-section {
   padding: 1rem;
   border: 1px solid rgba(0, 0, 0, .12);

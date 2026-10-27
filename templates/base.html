@@ -230,6 +230,7 @@
               Reports
             </a>
             <ul class="dropdown-menu">
+              <li><a class="dropdown-item" href="{{ url_for('corn_pricing_report') }}">Monthly Corn Pricing</a></li>
               {% if current_user.is_authenticated and current_user.is_admin %}
                 <li><a class="dropdown-item" href="{{ url_for('billing') }}">Billing</a></li>
                 <li><hr class="dropdown-divider"></li>
@@ -333,6 +334,7 @@
     });
   </script>
 
+  <script src="{{ url_for('static', filename='sticky_report_headers.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

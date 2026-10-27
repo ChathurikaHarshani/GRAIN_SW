@@ -26,6 +26,9 @@
     <label class="form-label ">Crop Year</label>
     <select name="crop_year" class="form-select">
       <option value="">All Years</option>
+      {% if active_filters.crop_year and active_filters.crop_year|string not in filter_options.crop_years|map('string')|list %}
+      <option value="{{ active_filters.crop_year }}" selected>{{ active_filters.crop_year }}</option>
+      {% endif %}
       {% for value in filter_options.crop_years %}<option value="{{ value }}" {% if active_filters.crop_year|string == value|string %}selected{% endif %}>{{ value }}</option>{% endfor %}
     </select>
   </div>
@@ -68,6 +71,35 @@
   </div>
 </form>
 
+<div class="border rounded p-3 mb-3 no-print" id="yield-highlight-controls">
+  <div class="form-check form-switch mb-2">
+    <input class="form-check-input" type="checkbox" id="highlight-yields">
+    <label class="form-check-label" for="highlight-yields">Highlight unusual yields</label>
+  </div>
+  <div class="row g-2 align-items-end">
+    <div class="col-md-5"><label class="form-label" for="yield-comparison">Compare within</label>
+      <select class="form-select" id="yield-comparison">
+        <option value="irrigation">Irrigation type (dryland / irrigated)</option>
+        <option value="hybrid">Hybrid/variety and irrigation type</option>
+      </select>
+    </div>
+    <div class="col-md-3"><label class="form-label" for="yield-moderate">Moderate difference (%)</label>
+      <input class="form-control" id="yield-moderate" type="number" min="0.1" max="1000" step="0.1" value="15">
+    </div>
+    <div class="col-md-3"><label class="form-label" for="yield-extreme">Extreme difference (%)</label>
+      <input class="form-control" id="yield-extreme" type="number" min="0.1" max="1000" step="0.1" value="30">
+    </div>
+  </div>
+  <p class="text-danger mb-0 mt-2" id="yield-highlight-error" role="status"></p>
+</div>
+<p id="yield-highlight-legend" class="small" hidden>
+  <span class="yield-legend-moderate">Amber: moderate</span> · <span class="yield-legend-extreme">Red: extreme</span>.
+  Labels show high/low and percentage from the acreage-weighted group average.
+  Compare only fields shown in the same crop and crop year; at least two fields per group are required.
+  Zero-acre fields, missing irrigation types, and missing hybrids in hybrid mode are excluded.
+  Highlighting affects this page and printing; Excel exports retain their existing format.
+</p>
+
 {% for section in yield_sections %}
 <section class="yield-summary-section mb-5">
   <div class="d-flex justify-content-between align-items-baseline border-bottom border-dark mb-2">
@@ -94,10 +126,12 @@
           </thead>
           <tbody>
             {% for r in section.rows %}
-            <tr>
+            <tr data-yield-field data-acres="{{ r.Acres if r.Acres is not none else '' }}"
+                data-bushels="{{ r.Total_Bushels if r.Total_Bushels is not none else '' }}"
+                data-irrigation="{{ r.Irr_Type or '' }}" data-hybrid="{{ r.Hybrid_Variety or '' }}">
               <td>{{ r.Field_Name }}</td>
               <td class="text-end">{{ "{:,.1f}".format(r.Acres or 0) }}</td>
-              <td class="text-end">{{ "{:,.1f}".format(r.Yield_bu_per_acre or 0) }}</td>
+              <td class="text-end">{{ "{:,.1f}".format(r.Yield_bu_per_acre or 0) }}<span class="yield-deviation d-block small"></span></td>
               <td class="text-end">{{ "{:,.1f}".format(r.Total_Bushels or 0) }}</td>
               <td>{{ r.Hybrid_Variety or '-' }}</td>
               <td>{{ (r.Irr_Type[0]|upper) if r.Irr_Type else '-' }}</td>
@@ -171,4 +205,8 @@
 {% else %}
 <p class="text-muted">No yield records found for the selected filters.</p>
 {% endfor %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='yield_highlights.js') }}"></script>
 {% endblock %}

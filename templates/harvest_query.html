@@ -17,6 +17,9 @@
       <label class="form-label">Year</label>
       <select class="form-select" name="crop_year" id="filter-year">
         <option value="">-- All Years --</option>
+        {% if selected_year and selected_year|string not in years|map(attribute='Crop_Year')|map('string')|list %}
+        <option value="{{ selected_year }}" selected>{{ selected_year }}</option>
+        {% endif %}
         {% for y in years %}
           <option value="{{ y.Crop_Year }}" {% if selected_year|string == y.Crop_Year|string %}selected{% endif %}>
             {{ y.Crop_Year }}
@@ -87,7 +90,7 @@
     <div class="col-12">
       <div class="form-check">
         <input class="form-check-input" type="checkbox" name="needs_attention" value="1" id="filter-needs-attention" {% if needs_attention %}checked{% endif %}>
-        <label class="form-check-label" for="filter-needs-attention">Needs attention: missing weight, moisture, or storage</label>
+        <label class="form-check-label" for="filter-needs-attention">Needs attention: missing weight, moisture, or storage (excluding dismissed warnings)</label>
       </div>
     </div>
   </form>
@@ -283,6 +286,7 @@
 
   <!-- Results table -->
   <h4 class="mb-3">Loads</h4>
+  <p class="small text-muted">Dismiss intentionally missing data from Needs Attention. Uncheck Needs attention to find dismissed loads and restore their warnings. Dismissal stays in effect until restored.</p>
 
   {% if loads %}
     <div class="table-responsive">
@@ -302,6 +306,7 @@
             <th>Cart</th>
             <th>Bushels</th>
             <th>Note</th>
+            <th>Attention</th>
             {% if can_edit %}<th>Edit</th>{% endif %}
           </tr>
         </thead>
@@ -321,6 +326,28 @@
             <td>{{ r.Cart_Display }}</td>
             <td>{{ "{:,.1f}".format(r.Calculated_Bushels) if r.Calculated_Bushels is not none else "-" }}</td>
             <td>{{ r.Note if r.Note else "-" }}</td>
+            <td>
+              {% if r.Attention_Dismissed %}
+                <span class="badge text-bg-secondary">Warning dismissed</span>
+                {% if r.Attention_Reason %}<div class="small">{{ r.Attention_Reason }}</div>{% endif %}
+              {% elif r.Missing_Data %}
+                <span class="badge text-bg-warning">Needs attention</span>
+              {% else %}<span class="text-muted">Complete</span>{% endif %}
+              {% if can_edit and (r.Missing_Data or r.Attention_Dismissed) %}
+              <form class="mt-2 no-print" method="post" action="{{ url_for('harvest_attention.update', harvest_id=r.Harvest_ID, crop_year=selected_year, field_id=selected_field_id, field_name=selected_field, storloc_id=selected_storage, truck_id=extra_filters.truck_id, crop_id=extra_filters.crop_id, date_from=extra_filters.date_from, date_to=extra_filters.date_to, needs_attention='1' if needs_attention else '') }}">
+                <input type="hidden" name="csrf_token" value="{{ access_csrf_token() }}">
+                {% if r.Attention_Dismissed %}
+                  <button class="btn btn-sm btn-outline-secondary" name="action" value="restore">Restore warning</button>
+                {% else %}
+                  <details><summary>Dismiss warning</summary>
+                    <label class="form-label small" for="attention-reason-{{ r.Harvest_ID }}">Reason (optional)</label>
+                    <input class="form-control form-control-sm mb-2" id="attention-reason-{{ r.Harvest_ID }}" name="reason" maxlength="500" placeholder="e.g., scale ticket used">
+                    <button class="btn btn-sm btn-outline-secondary" name="action" value="dismiss">Dismiss warning</button>
+                  </details>
+                {% endif %}
+              </form>
+              {% endif %}
+            </td>
             {% if can_edit %}<td>
               <a
                 class="btn btn-sm btn-outline-primary"

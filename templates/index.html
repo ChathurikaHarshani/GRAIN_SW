@@ -198,10 +198,22 @@
   <div class="col-lg-6">
     <div class="main-content shadow-sm h-100 gms-card">
       <div class="d-flex align-items-center justify-content-between mb-2">
-        <h5 class="fw-bold mb-0">Inventory by Crop · {{ dashboard_data.year }}</h5>
+        <h5 class="fw-bold mb-0">Inventory by Crop &amp; Bin · {{ dashboard_data.year }}</h5>
         <span class="badge text-bg-light border">Live data</span>
       </div>
-      <canvas id="inventoryChart" height="120"></canvas>
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <label for="inventoryCrop" class="form-label mb-0">View</label>
+        <select id="inventoryCrop" class="form-select form-select-sm w-auto">
+          {% for crop in dashboard_data.inventory_labels %}
+          <option value="{{ loop.index0 }}" {% if crop == 'Corn' %}selected{% endif %}>{{ crop }} by bin</option>
+          {% endfor %}
+          <option value="all">All crops overview</option>
+        </select>
+      </div>
+      <div id="inventoryChartWrap" style="position: relative; height: 280px;">
+        <canvas id="inventoryChart" role="img" aria-label="Inventory bushels by storage bin"></canvas>
+      </div>
+      <small id="inventoryChartNote" class="text-muted"></small>
     </div>
   </div>
 </div>
@@ -226,7 +238,10 @@
   const monthlyDeliveryLabels = dashboardChartData.monthly_delivery_labels;
   const monthlyDeliveryBushels = dashboardChartData.monthly_delivery_bushels;
   const inventoryLabels = dashboardChartData.inventory_labels;
-  const inventoryBushels = dashboardChartData.inventory_bushels;
+  const inventoryDatasets = dashboardChartData.inventory_datasets.map((dataset, index) => ({
+    ...dataset,
+    backgroundColor: `hsl(${(index * 137.508 + 205) % 360}, 65%, 62%)`
+  }));
 
   new Chart(document.getElementById('deliveriesChart'), {
     type: 'line',
@@ -245,20 +260,54 @@
     }
   });
 
-  new Chart(document.getElementById('inventoryChart'), {
+  let inventoryChart;
+  const inventoryCrop = document.getElementById('inventoryCrop');
+  function drawInventory() {
+    if (inventoryChart) inventoryChart.destroy();
+    const overview = inventoryCrop.value === 'all';
+    const cropIndex = Number(inventoryCrop.value);
+    const bins = overview ? [] : inventoryDatasets
+      .map(dataset => ({ label: dataset.label, value: dataset.data[cropIndex], color: dataset.backgroundColor }))
+      .filter(bin => bin.value !== 0)
+      .sort((a, b) => b.value - a.value);
+    document.getElementById('inventoryChartWrap').style.height =
+      `${overview ? 300 : Math.max(240, bins.length * 38 + 60)}px`;
+    document.getElementById('inventoryChartNote').textContent = overview
+      ? 'Colors identify bins. Select a crop to compare its bins on a separate scale.'
+      : bins.length
+        ? `${inventoryLabels[cropIndex]} only. Each bar is one storage/bin location. Hover for exact bushels.`
+        : `No nonzero bin inventory for ${inventoryLabels[cropIndex]}.`;
+    inventoryChart = new Chart(document.getElementById('inventoryChart'), {
     type: 'bar',
     data: {
-      labels: inventoryLabels,
-      datasets: [{
-        label: 'Inventory (bushels)',
-        data: inventoryBushels
+      labels: overview ? inventoryLabels : bins.map(bin => bin.label),
+      datasets: overview ? inventoryDatasets : [{
+        label: `${inventoryLabels[cropIndex]} inventory`,
+        data: bins.map(bin => bin.value),
+        backgroundColor: bins.map(bin => bin.color)
       }]
     },
     options: {
       responsive: true,
-      plugins: { legend: { display: true } },
-      scales: { y: { beginAtZero: true } }
+      maintainAspectRatio: false,
+      indexAxis: overview ? 'x' : 'y',
+      plugins: {
+        legend: { display: overview, position: 'bottom' },
+        tooltip: { callbacks: {
+          label: context => `${context.dataset.label}: ${(overview ? context.parsed.y : context.parsed.x).toLocaleString(undefined, {maximumFractionDigits: 2})} bu`
+        } }
+      },
+      scales: overview ? {
+        x: { stacked: true },
+        y: { stacked: true, beginAtZero: true, title: { display: true, text: 'Bushels' } }
+      } : {
+        x: { beginAtZero: true, title: { display: true, text: 'Bushels' } },
+        y: { ticks: { autoSkip: false } }
+      }
     }
-  });
+    });
+  }
+  inventoryCrop.addEventListener('change', drawInventory);
+  drawInventory();
 </script>
 {% endblock %}
